@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
+import Image from 'next/image'
 import { notFound } from 'next/navigation'
 
 export default async function PublicProfilePage({ params }: { params: { username: string } }) {
@@ -56,14 +57,7 @@ export default async function PublicProfilePage({ params }: { params: { username
       <div className="w-full max-w-md mx-auto px-4 py-8 space-y-5 overflow-x-hidden">
         {/* Branding */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'var(--accent)' }}>
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-                <path d="M8 2L10 6H14L11 9L12 13L8 11L4 13L5 9L2 6H6L8 2Z" fill="#0D1117"/>
-              </svg>
-            </div>
-            <span className="text-base font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>nuroni</span>
-          </div>
+          <Image src="/logo.png" alt="Nuroni" width={110} height={73} style={{ objectFit: 'contain', height: '32px', width: 'auto' }} />
           <span className="text-xs px-2 py-1 rounded-full" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)', fontWeight: 500 }}>
             Public journey
           </span>

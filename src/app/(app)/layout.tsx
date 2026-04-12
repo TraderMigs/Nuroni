@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useEffect, useState } from 'react'
+import Image from 'next/image'
 
 function ThemeToggle() {
   const [dark, setDark] = useState(false)
@@ -81,23 +82,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     },
   ]
 
-  // Pages that show a back arrow instead of full nav context
-  const subPages: string[] = [] // extend if you add subpages later
-
   return (
     <div className="min-h-screen flex flex-col overflow-x-hidden" style={{ background: 'var(--bg)' }}>
       {/* Top bar */}
-      <header className="sticky top-0 z-40 flex items-center justify-between px-4 py-3 border-b" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'var(--accent)' }}>
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-              <path d="M8 2L10 6H14L11 9L12 13L8 11L4 13L5 9L2 6H6L8 2Z" fill="#0D1117"/>
-            </svg>
-          </div>
-          <span className="text-base font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-            nuroni
-          </span>
-        </div>
+      <header className="sticky top-0 z-40 flex items-center justify-between px-4 py-2 border-b" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+        <Image
+          src="/logo.png"
+          alt="Nuroni"
+          width={100}
+          height={40}
+          style={{ objectFit: 'contain', height: '36px', width: 'auto' }}
+          priority
+        />
         <div className="flex items-center gap-1">
           <ThemeToggle />
           <button onClick={handleLogout} className="nav-item" aria-label="Sign out">
@@ -108,7 +104,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      {/* Main content */}
       <main className="flex-1 pb-24 page-enter w-full overflow-x-hidden">
         {children}
       </main>

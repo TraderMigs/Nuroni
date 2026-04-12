@@ -14,6 +14,13 @@ export const metadata: Metadata = {
     title: "Nuroni — Track less. Show real progress.",
     description: "Simple, shareable weight loss progress tracker.",
     type: "website",
+    images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "Nuroni" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Nuroni — Track less. Show real progress.",
+    description: "Simple, shareable weight loss progress tracker.",
+    images: ["/og-image.png"],
   },
 };
 

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import Image from 'next/image'
 
 export default function OnboardingPage() {
   const [step, setStep] = useState(1)
@@ -87,16 +88,7 @@ export default function OnboardingPage() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="text-center mb-6">
-          <div className="inline-flex items-center gap-2 mb-1">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'var(--accent)' }}>
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-                <path d="M8 2L10 6H14L11 9L12 13L8 11L4 13L5 9L2 6H6L8 2Z" fill="#0D1117"/>
-              </svg>
-            </div>
-            <span className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-              nuroni
-            </span>
-          </div>
+          <Image src="/logo.png" alt="Nuroni" width={160} height={107} className="mx-auto" style={{ objectFit: 'contain' }} priority />
         </div>
 
         {/* Step indicators */}
