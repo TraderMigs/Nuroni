@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import type { CookieOptions } from '@supabase/ssr'
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
@@ -12,7 +13,7 @@ export async function middleware(request: NextRequest) {
         getAll() {
           return request.cookies.getAll()
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: { name: string; value: string; options?: CookieOptions }[]) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           supabaseResponse = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) =>
@@ -27,13 +28,8 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
-  // Public routes that don't need auth
-  const publicRoutes = ['/', '/login', '/signup', '/u']
-  const isPublicRoute = publicRoutes.some(route => pathname === route || pathname.startsWith('/u/'))
-
-  // Protected routes
-  const protectedRoutes = ['/profile', '/goals', '/progress', '/onboarding']
-  const isProtectedRoute = protectedRoutes.some(route => pathname.startsWith(route))
+  const isPublicRoute = ['/', '/login', '/signup'].includes(pathname) || pathname.startsWith('/u/')
+  const isProtectedRoute = ['/profile', '/goals', '/progress', '/onboarding'].some(r => pathname.startsWith(r))
 
   if (!user && isProtectedRoute) {
     return NextResponse.redirect(new URL('/login', request.url))
