@@ -1,0 +1,128 @@
+'use client'
+
+import { usePathname, useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+import { useEffect, useState } from 'react'
+
+function ThemeToggle() {
+  const [dark, setDark] = useState(false)
+
+  useEffect(() => {
+    const stored = localStorage.getItem('nuroni-theme')
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    const isDark = stored === 'dark' || (!stored && prefersDark)
+    setDark(isDark)
+    if (isDark) document.documentElement.classList.add('dark')
+    else document.documentElement.classList.remove('dark')
+  }, [])
+
+  function toggle() {
+    const next = !dark
+    setDark(next)
+    localStorage.setItem('nuroni-theme', next ? 'dark' : 'light')
+    if (next) document.documentElement.classList.add('dark')
+    else document.documentElement.classList.remove('dark')
+  }
+
+  return (
+    <button onClick={toggle} className="nav-item" aria-label="Toggle theme">
+      {dark ? (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="5"/>
+          <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+        </svg>
+      ) : (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      )}
+    </button>
+  )
+}
+
+export default function AppLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
+  const router = useRouter()
+  const supabase = createClient()
+
+  async function handleLogout() {
+    await supabase.auth.signOut()
+    router.push('/login')
+    router.refresh()
+  }
+
+  const navItems = [
+    {
+      href: '/progress',
+      label: 'Progress',
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+      ),
+    },
+    {
+      href: '/goals',
+      label: 'Goals',
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+        </svg>
+      ),
+    },
+    {
+      href: '/profile',
+      label: 'Profile',
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+        </svg>
+      ),
+    },
+  ]
+
+  return (
+    <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg)' }}>
+      {/* Top bar */}
+      <header className="sticky top-0 z-40 flex items-center justify-between px-4 py-3 border-b" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'var(--accent)' }}>
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+              <path d="M8 2L10 6H14L11 9L12 13L8 11L4 13L5 9L2 6H6L8 2Z" fill="#0D1117"/>
+            </svg>
+          </div>
+          <span className="text-base font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+            nuroni
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          <ThemeToggle />
+          <button onClick={handleLogout} className="nav-item" aria-label="Sign out">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      {/* Main content */}
+      <main className="flex-1 pb-24 page-enter">
+        {children}
+      </main>
+
+      {/* Bottom navigation */}
+      <nav className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around px-4 py-2 border-t" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+        {navItems.map(item => (
+          <button
+            key={item.href}
+            className={`nav-item ${pathname === item.href ? 'active' : ''}`}
+            onClick={() => router.push(item.href)}
+          >
+            {item.icon}
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </nav>
+    </div>
+  )
+}
