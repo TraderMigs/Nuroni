@@ -90,7 +90,7 @@ export default function ProgressPage() {
 
   if (loading) return (
     <div className="flex items-center justify-center min-h-screen">
-      <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+      <div className="w-6 h-6 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
     </div>
   )
 
@@ -110,23 +110,23 @@ export default function ProgressPage() {
   }))
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-5 space-y-5">
+    <div className="w-full max-w-lg mx-auto px-4 py-5 space-y-5 overflow-x-hidden">
       {toast && <Toast msg={toast} onDone={() => setToast('')} />}
 
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold truncate" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
             {profile.display_name}
           </h1>
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Your progress</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-shrink-0">
           <button onClick={copyLink} className="btn-secondary py-2 px-3 text-sm gap-1.5">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
             </svg>
-            Copy link
+            Copy
           </button>
           <button onClick={shareLink} className="btn-primary py-2 px-3 text-sm gap-1.5">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -202,7 +202,7 @@ export default function ProgressPage() {
 
       {/* Chart */}
       {chartData.length > 1 && (
-        <div className="card p-4">
+        <div className="card p-4 overflow-hidden">
           <h2 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
             Weight trend
           </h2>
@@ -212,7 +212,7 @@ export default function ProgressPage() {
               <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} />
               <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
               <Tooltip
-                contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 12 }}
+                contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 12, color: 'var(--text-primary)' }}
                 labelStyle={{ color: 'var(--text-secondary)' }}
                 itemStyle={{ color: 'var(--accent)' }}
               />
@@ -231,19 +231,19 @@ export default function ProgressPage() {
           <div className="space-y-2">
             {entries.slice(0, 10).map((entry, i) => (
               <div key={entry.id} className="flex items-center justify-between py-2 border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 min-w-0">
                   {i === 0 && (
-                    <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
                       Latest
                     </span>
                   )}
-                  <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                  <span className="text-sm truncate" style={{ color: 'var(--text-secondary)' }}>
                     {new Date(entry.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </span>
                 </div>
-                <div className="flex items-center gap-4 text-sm">
+                <div className="flex items-center gap-3 text-sm flex-shrink-0">
                   <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{entry.weight} {unit}</span>
-                  {entry.steps > 0 && <span style={{ color: 'var(--text-muted)' }}>{entry.steps.toLocaleString()} steps</span>}
+                  {entry.steps > 0 && <span style={{ color: 'var(--text-muted)' }}>{entry.steps.toLocaleString()}</span>}
                 </div>
               </div>
             ))}

@@ -53,7 +53,7 @@ export default async function PublicProfilePage({ params }: { params: { username
       {/* Thin top accent bar */}
       <div className="h-1 w-full" style={{ background: 'linear-gradient(90deg, var(--accent), var(--accent-hover))' }} />
 
-      <div className="max-w-md mx-auto px-4 py-8 space-y-5">
+      <div className="w-full max-w-md mx-auto px-4 py-8 space-y-5 overflow-x-hidden">
         {/* Branding */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

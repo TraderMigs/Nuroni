@@ -74,7 +74,7 @@ export default function ProfilePage() {
   )
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-5">
+    <div className="w-full max-w-lg mx-auto px-4 py-5 overflow-x-hidden">
       {toast && <Toast msg={toast} onDone={() => setToast('')} />}
 
       <div className="mb-5">

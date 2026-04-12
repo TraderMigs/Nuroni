@@ -81,12 +81,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     },
   ]
 
+  // Pages that show a back arrow instead of full nav context
+  const subPages: string[] = [] // extend if you add subpages later
+
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg)' }}>
+    <div className="min-h-screen flex flex-col overflow-x-hidden" style={{ background: 'var(--bg)' }}>
       {/* Top bar */}
       <header className="sticky top-0 z-40 flex items-center justify-between px-4 py-3 border-b" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'var(--accent)' }}>
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'var(--accent)' }}>
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
               <path d="M8 2L10 6H14L11 9L12 13L8 11L4 13L5 9L2 6H6L8 2Z" fill="#0D1117"/>
             </svg>
@@ -106,7 +109,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </header>
 
       {/* Main content */}
-      <main className="flex-1 pb-24 page-enter">
+      <main className="flex-1 pb-24 page-enter w-full overflow-x-hidden">
         {children}
       </main>
 
