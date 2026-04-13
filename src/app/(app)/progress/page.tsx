@@ -16,6 +16,50 @@ function Toast({ msg, onDone }: { msg: string; onDone: () => void }) {
   return <div className="toast">{msg}</div>
 }
 
+// Compute streak from entries (consecutive days logged)
+function computeStreak(entries: Entry[]): number {
+  if (!entries.length) return 0
+  const days = entries.map(e => new Date(e.created_at).toDateString())
+  const unique = [...new Set(days)]
+  let streak = 1
+  const today = new Date().toDateString()
+  const yesterday = new Date(Date.now() - 86400000).toDateString()
+  if (unique[0] !== today && unique[0] !== yesterday) return 0
+  for (let i = 1; i < unique.length; i++) {
+    const prev = new Date(unique[i - 1])
+    const curr = new Date(unique[i])
+    const diff = (prev.getTime() - curr.getTime()) / 86400000
+    if (diff === 1) streak++
+    else break
+  }
+  return streak
+}
+
+// Weekly summary: last 7 days of entries
+function getWeeklySummary(entries: Entry[], unit: string) {
+  const cutoff = new Date(Date.now() - 7 * 86400000)
+  const week = entries.filter(e => new Date(e.created_at) >= cutoff)
+  if (week.length < 2) return null
+  const latest = week[0].weight
+  const oldest = week[week.length - 1].weight
+  const change = parseFloat((oldest - latest).toFixed(1))
+  const avgSteps = Math.round(week.reduce((s, e) => s + (e.steps || 0), 0) / week.length)
+  return { change, avgSteps, days: week.length }
+}
+
+// Milestone checks
+function getMilestone(lostSoFar: number, unit: string, pctToGoal: number): string | null {
+  if (pctToGoal >= 100) return `🏆 You reached your goal! Incredible work.`
+  if (pctToGoal >= 75) return `🔥 75% of the way there — keep pushing!`
+  if (pctToGoal >= 50) return `⚡ Halfway to your goal!`
+  if (pctToGoal >= 25) return `💪 25% of the way there — great start!`
+  if (lostSoFar >= 20) return `🌟 20 ${unit} lost — that's a big deal!`
+  if (lostSoFar >= 10) return `🎯 10 ${unit} lost — momentum is real!`
+  if (lostSoFar >= 5) return `✨ 5 ${unit} lost — you're doing it!`
+  if (lostSoFar >= 1) return `🌱 First pound down — the journey begins!`
+  return null
+}
+
 export default function ProgressPage() {
   const supabase = createClient()
   const router = useRouter()
@@ -26,6 +70,7 @@ export default function ProgressPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState('')
+  const [showWeekly, setShowWeekly] = useState(false)
 
   const [weightInput, setWeightInput] = useState('')
   const [stepsInput, setStepsInput] = useState('')
@@ -38,7 +83,7 @@ export default function ProgressPage() {
     const [{ data: p }, { data: g }, { data: e }] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
       supabase.from('goals').select('*').eq('user_id', user.id).maybeSingle(),
-      supabase.from('entries').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30),
+      supabase.from('entries').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(60),
     ])
 
     if (!p) { router.push('/onboarding'); return }
@@ -73,8 +118,7 @@ export default function ProgressPage() {
 
   async function copyLink() {
     if (!profile) return
-    const url = `${window.location.origin}/u/${profile.username}`
-    await navigator.clipboard.writeText(url)
+    await navigator.clipboard.writeText(`${window.location.origin}/u/${profile.username}`)
     setToast('Link copied!')
   }
 
@@ -83,9 +127,7 @@ export default function ProgressPage() {
     const url = `${window.location.origin}/u/${profile.username}`
     if (navigator.share) {
       await navigator.share({ title: `${profile.display_name}'s journey on Nuroni`, url })
-    } else {
-      copyLink()
-    }
+    } else { copyLink() }
   }
 
   if (loading) return (
@@ -103,6 +145,9 @@ export default function ProgressPage() {
   const latestSteps = entries[0]?.steps ?? 0
   const unit = profile.weight_unit
   const distUnit = profile.distance_unit
+  const streak = computeStreak(entries)
+  const milestone = getMilestone(lostSoFar, unit, pctToGoal)
+  const weekly = getWeeklySummary(entries, unit)
 
   const chartData = [...entries].reverse().slice(-14).map(e => ({
     date: new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
@@ -137,6 +182,89 @@ export default function ProgressPage() {
           </button>
         </div>
       </div>
+
+      {/* Milestone banner */}
+      {milestone && lostSoFar > 0 && (
+        <div className="card p-3 flex items-center gap-3" style={{ background: 'var(--accent-subtle)', borderColor: 'rgba(45,212,191,0.3)' }}>
+          <p className="text-sm font-medium flex-1" style={{ color: 'var(--accent-text)' }}>{milestone}</p>
+        </div>
+      )}
+
+      {/* Streak + Weekly row */}
+      <div className="grid grid-cols-2 gap-3">
+        {/* Streak */}
+        <div className="stat-card flex items-center gap-3">
+          <div className="text-2xl">{streak >= 7 ? '🔥' : streak >= 3 ? '⚡' : '📅'}</div>
+          <div>
+            <div className="stat-value" style={{ fontSize: '1.5rem' }}>{streak}</div>
+            <div className="stat-label">Day streak</div>
+          </div>
+        </div>
+
+        {/* Weekly summary toggle */}
+        <button
+          className="stat-card text-left"
+          onClick={() => setShowWeekly(v => !v)}
+          style={{ cursor: 'pointer' }}
+        >
+          <div className="flex items-center justify-between mb-1">
+            <span className="stat-label">This week</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', transform: showWeekly ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </div>
+          {weekly ? (
+            <div className="stat-value" style={{ fontSize: '1.25rem', color: weekly.change > 0 ? 'var(--success)' : weekly.change < 0 ? 'var(--danger)' : 'var(--text-primary)' }}>
+              {weekly.change > 0 ? `−${weekly.change}` : weekly.change < 0 ? `+${Math.abs(weekly.change)}` : '—'} {unit}
+            </div>
+          ) : (
+            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Log more days</div>
+          )}
+        </button>
+      </div>
+
+      {/* Weekly expanded summary */}
+      {showWeekly && weekly && (
+        <div className="card p-4 animate-fade-in">
+          <h3 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+            Weekly summary
+          </h3>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div>
+              <div className="text-lg font-bold" style={{ color: weekly.change > 0 ? 'var(--success)' : 'var(--danger)', fontFamily: 'var(--font-display)' }}>
+                {weekly.change > 0 ? `−${weekly.change}` : `+${Math.abs(weekly.change)}`}
+              </div>
+              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{unit} this week</div>
+            </div>
+            <div>
+              <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                {weekly.avgSteps.toLocaleString()}
+              </div>
+              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>avg steps/day</div>
+            </div>
+            <div>
+              <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                {weekly.days}
+              </div>
+              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>days logged</div>
+            </div>
+          </div>
+          <button
+            onClick={async () => {
+              const text = `📊 My Nuroni week:\n${weekly.change > 0 ? `−${weekly.change}` : `+${Math.abs(weekly.change)}`} ${unit} · ${weekly.avgSteps.toLocaleString()} avg steps · ${weekly.days} days logged\n\nnuroni.app/u/${profile.username}`
+              if (navigator.share) {
+                await navigator.share({ text })
+              } else {
+                await navigator.clipboard.writeText(text)
+                setToast('Weekly summary copied!')
+              }
+            }}
+            className="btn-secondary w-full mt-3 text-sm"
+          >
+            Share weekly summary
+          </button>
+        </div>
+      )}
 
       {/* Progress to goal */}
       <div className="card p-4">
