@@ -77,6 +77,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       ),
     },
     {
+      href: '/chat',
+      label: 'Chat',
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+      ),
+      plusOnly: true,
+    },
+    {
       href: '/profile',
       label: 'Profile',
       icon: (
@@ -121,15 +131,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {children}
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around px-4 py-2 border-t" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+      <nav className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around px-2 py-2 border-t" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
         {navItems.map(item => (
           <button
             key={item.href}
-            className={`nav-item ${pathname === item.href ? 'active' : ''}`}
+            className={`nav-item relative ${pathname === item.href ? 'active' : ''}`}
             onClick={() => router.push(item.href)}
           >
             {item.icon}
             <span>{item.label}</span>
+            {item.plusOnly && !isPlus && (
+              <span className="absolute -top-1 -right-1 text-xs w-3.5 h-3.5 flex items-center justify-center rounded-full font-bold" style={{ background: 'var(--accent)', color: '#0D1117', fontSize: '7px' }}>
+                +
+              </span>
+            )}
           </button>
         ))}
       </nav>
