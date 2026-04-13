@@ -87,6 +87,7 @@ export default function ChatPage() {
   const [followedIds, setFollowedIds] = useState<Set<string>>(new Set())
   const [profileModal, setProfileModal] = useState<ProfileModal | null>(null)
   const [followLoading, setFollowLoading] = useState(false)
+  const [showTip, setShowTip] = useState(false)
 
   const fetchProfiles = useCallback(async (userIds: string[]) => {
     const { data: profiles } = await supabase
@@ -131,6 +132,10 @@ export default function ChatPage() {
       if (!profile?.is_plus) { setIsPlus(false); return }
       setIsPlus(true)
       setIsAdmin(profile?.is_admin || false)
+
+      // Show one-time tip if never seen
+      const tipSeen = localStorage.getItem('nuroni-chat-tip')
+      if (!tipSeen) setShowTip(true)
 
       // Load follows
       const { data: follows } = await supabase
@@ -190,6 +195,13 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length])
 
+  useEffect(() => {
+    if (showTip) {
+      const t = setTimeout(dismissTip, 6000)
+      return () => clearTimeout(t)
+    }
+  }, [showTip])
+
   async function openProfile(msg: Message) {
     if (!msg.username) return
     const { data: goal } = await supabase
@@ -226,6 +238,11 @@ export default function ChatPage() {
       if (profileModal) setProfileModal({ ...profileModal, follower_count: profileModal.follower_count + 1 })
     }
     setFollowLoading(false)
+  }
+
+  function dismissTip() {
+    setShowTip(false)
+    localStorage.setItem('nuroni-chat-tip', '1')
   }
 
   async function sendMessage(mediaUrl?: string, mediaType?: string) {
@@ -301,6 +318,21 @@ export default function ChatPage() {
         </div>
         <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: 'var(--accent)', color: '#0D1117' }}>✦ Live</span>
       </div>
+
+      {/* One-time tip */}
+      {showTip && (
+        <div
+          className="mx-4 mt-2 px-4 py-3 rounded-xl flex items-center justify-between gap-3 animate-fade-in"
+          style={{ background: 'var(--accent-subtle)', border: '1px solid rgba(45,212,191,0.3)' }}
+        >
+          <p className="text-xs" style={{ color: 'var(--accent-text)', lineHeight: 1.5 }}>
+            💡 <strong>Tap any name</strong> to check their stats and follow their journey.
+          </p>
+          <button onClick={dismissTip} style={{ color: 'var(--accent-text)', flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
