@@ -3,7 +3,6 @@
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useEffect, useState } from 'react'
-import Image from 'next/image'
 
 function ThemeToggle() {
   const [dark, setDark] = useState(false)
@@ -104,13 +103,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen flex flex-col overflow-x-hidden" style={{ background: 'var(--bg)' }}>
       <header className="sticky top-0 z-40 flex items-center justify-between px-4 py-2 border-b" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-        <Image
+        <img
           src="/logo.png"
           alt="Nuroni"
-          width={160}
-          height={53}
-          style={{ objectFit: 'contain', height: '44px', width: 'auto', maxWidth: '160px' }}
-          priority
+          style={{ height: '44px', width: 'auto', maxWidth: '180px', display: 'block' }}
         />
         <div className="flex items-center gap-1">
           {!isPlus && (

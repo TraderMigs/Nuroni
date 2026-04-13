@@ -1,4 +1,3 @@
-import Image from 'next/image'
 import Link from 'next/link'
 
 export default function LandingPage() {
@@ -11,7 +10,7 @@ export default function LandingPage() {
 
       {/* Nav */}
       <nav className="landing-nav">
-        <Image src="/logo.png" alt="Nuroni" width={180} height={60} style={{ objectFit: 'contain', height: '48px', width: 'auto' }} priority />
+        <img src="/logo.png" alt="Nuroni" style={{ height: '48px', width: 'auto', display: 'block' }} />
         <div className="landing-nav-links">
           <Link href="/login" className="landing-nav-link">Sign in</Link>
           <Link href="/signup" className="landing-cta-sm">Start free</Link>
@@ -115,7 +114,7 @@ export default function LandingPage() {
 
       {/* Footer */}
       <footer className="landing-footer">
-        <Image src="/logo.png" alt="Nuroni" width={120} height={40} style={{ objectFit: 'contain', height: '32px', width: 'auto', opacity: 0.5 }} />
+        <img src="/logo.png" alt="Nuroni" style={{ height: '44px', width: 'auto', display: 'block', margin: '0 auto' }} />
         <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
           © {new Date().getFullYear()} Nuroni · Track less. Show real progress.
         </p>

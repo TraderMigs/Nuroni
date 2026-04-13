@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import Image from 'next/image'
 
 export default function PlusPage() {
   const [loading, setLoading] = useState(false)
@@ -56,7 +55,7 @@ export default function PlusPage() {
       <div className="relative z-10 max-w-md mx-auto px-4 py-8 space-y-6">
         {/* Header */}
         <div className="text-center">
-          <Image src="/logo.png" alt="Nuroni" width={120} height={80} style={{ objectFit: 'contain', height: '48px', width: 'auto' }} />
+          <img src="/logo.png" alt="Nuroni" style={{ height: '44px', width: 'auto', display: 'block', margin: '0 auto' }} />
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-semibold mb-3" style={{ background: 'var(--accent)', color: '#0D1117' }}>
             ✦ Plus+
           </div>

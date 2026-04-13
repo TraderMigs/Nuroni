@@ -14,28 +14,18 @@ interface Message {
   weight_unit?: string
   start_weight?: number
   current_weight?: number
-  is_plus?: boolean
 }
 
-// Filter rules — silent block
 const BLOCKED_PATTERNS = [
-  // Social platforms
   /instagram|facebook|tiktok|snapchat|twitter|youtube|linkedin|pinterest|threads|reddit|whatsapp|telegram|discord|twitch/i,
-  // Abbreviated socials
   /\big\b|\btt\b|\byt\b|\bfb\b|\bsc\b/i,
-  // URLs — any domain pattern
   /https?:\/\//i,
   /\b\w+\.(com|net|io|org|co|app|gg|tv|me|link|bio|xyz|info|us|uk|ca)\b/i,
-  // Email addresses
   /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/,
-  // Phone numbers
   /(\+?\d[\d\s\-().]{7,}\d)/,
-  // Redirect phrases
   /dm me|message me|text me|hit me up|reach me|contact me|find me|follow me/i,
-  // Payment platforms
   /venmo|cashapp|paypal|zelle|cash app/i,
-  // Self-promo patterns
-  /my program|my plan|my course|my coaching|my page|my profile|my channel/i,
+  /my program|my plan|my course|my coaching|my page|my channel/i,
 ]
 
 function isBlocked(text: string): boolean {
@@ -43,27 +33,7 @@ function isBlocked(text: string): boolean {
 }
 
 function formatTime(ts: string): string {
-  const d = new Date(ts)
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
-}
-
-function UserBadge({ msg }: { msg: Message }) {
-  const lostSoFar = msg.start_weight && msg.current_weight
-    ? parseFloat((msg.start_weight - msg.current_weight).toFixed(1))
-    : null
-  const unit = msg.weight_unit || 'lbs'
-  return (
-    <div className="flex items-center gap-1.5 flex-wrap">
-      <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
-        {msg.display_name || msg.username || 'Member'}
-      </span>
-      {lostSoFar !== null && lostSoFar > 0 && (
-        <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
-          −{lostSoFar} {unit}
-        </span>
-      )}
-    </div>
-  )
+  return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
 export default function ChatPage() {
@@ -80,43 +50,37 @@ export default function ChatPage() {
   const [userId, setUserId] = useState('')
   const [profileCache, setProfileCache] = useState<Record<string, Partial<Message>>>({})
 
-  const enrichMessages = useCallback(async (msgs: Message[], cache: Record<string, Partial<Message>>) => {
-    const unknownIds = Array.from(new Set(msgs.map(m => m.user_id))).filter(id => !cache[id])
-    if (unknownIds.length > 0) {
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, display_name, username, weight_unit, start_weight')
-        .in('id', unknownIds)
+  // Fetch profile data for a list of user IDs — non-blocking
+  const fetchProfiles = useCallback(async (userIds: string[]) => {
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, display_name, username, weight_unit, start_weight')
+      .in('id', userIds)
 
-      const { data: entries } = await supabase
-        .from('entries')
-        .select('user_id, weight, created_at')
-        .in('user_id', unknownIds)
-        .order('created_at', { ascending: false })
+    const { data: entries } = await supabase
+      .from('entries')
+      .select('user_id, weight, created_at')
+      .in('user_id', userIds)
+      .order('created_at', { ascending: false })
 
-      const latestWeights: Record<string, number> = {}
-      entries?.forEach(e => {
-        if (!latestWeights[e.user_id]) latestWeights[e.user_id] = e.weight
-      })
+    const latestWeights: Record<string, number> = {}
+    entries?.forEach(e => { if (!latestWeights[e.user_id]) latestWeights[e.user_id] = e.weight })
 
-      const newCache = { ...cache }
-      profiles?.forEach(p => {
-        newCache[p.id] = {
-          display_name: p.display_name,
-          username: p.username,
-          weight_unit: p.weight_unit,
-          start_weight: p.start_weight,
-          current_weight: latestWeights[p.id],
-        }
-      })
-      setProfileCache(newCache)
-      return newCache
-    }
-    return cache
+    const newEntries: Record<string, Partial<Message>> = {}
+    profiles?.forEach(p => {
+      newEntries[p.id] = {
+        display_name: p.display_name,
+        username: p.username,
+        weight_unit: p.weight_unit,
+        start_weight: p.start_weight,
+        current_weight: latestWeights[p.id],
+      }
+    })
+    return newEntries
   }, [supabase])
 
   useEffect(() => {
-    let mounted = true
+    let cleanup: (() => void) | undefined
 
     async function init() {
       const { data: { user } } = await supabase.auth.getUser()
@@ -124,54 +88,78 @@ export default function ChatPage() {
       setUserId(user.id)
 
       const { data: profile } = await supabase
-        .from('profiles')
-        .select('is_plus')
-        .eq('id', user.id)
-        .maybeSingle()
+        .from('profiles').select('is_plus').eq('id', user.id).maybeSingle()
 
       if (!profile?.is_plus) { setIsPlus(false); return }
       setIsPlus(true)
 
-      // Load last 50 messages
+      // Load last 50 messages — show immediately with no profile data
       const { data: msgs } = await supabase
         .from('messages')
         .select('*')
         .order('created_at', { ascending: true })
         .limit(50)
 
-      if (!mounted) return
-      const enriched = await enrichMessages(msgs || [], {})
-      setMessages((msgs || []).map(m => ({ ...m, ...enriched[m.user_id] })))
+      const initialMsgs = msgs || []
+      setMessages(initialMsgs)
 
-      // Subscribe to realtime
+      // Fetch profiles in background — update messages when ready
+      if (initialMsgs.length > 0) {
+        const ids = Array.from(new Set(initialMsgs.map(m => m.user_id)))
+        fetchProfiles(ids).then(cache => {
+          setProfileCache(cache)
+          setMessages(prev => prev.map(m => ({ ...m, ...cache[m.user_id] })))
+        })
+      }
+
+      // Realtime subscription
       const channel = supabase
         .channel('fitness-chat')
         .on('postgres_changes', {
           event: 'INSERT',
           schema: 'public',
           table: 'messages',
-        }, async (payload) => {
-          if (!mounted) return
+        }, (payload) => {
           const newMsg = payload.new as Message
+          // Show message INSTANTLY — enrich in background
+          setMessages(prev => {
+            // Check if already in list (optimistic)
+            if (prev.find(m => m.id === newMsg.id)) return prev
+            return [...prev, newMsg]
+          })
+          // Enrich with profile data in background
           setProfileCache(cache => {
-            enrichMessages([newMsg], cache).then(updatedCache => {
-              setMessages(prev => [...prev, { ...newMsg, ...updatedCache[newMsg.user_id] }])
+            if (cache[newMsg.user_id]) {
+              // Already have profile — apply immediately
+              setMessages(prev => prev.map(m =>
+                m.id === newMsg.id ? { ...m, ...cache[newMsg.user_id] } : m
+              ))
+              return cache
+            }
+            // Fetch fresh
+            fetchProfiles([newMsg.user_id]).then(newCache => {
+              const merged = { ...cache, ...newCache }
+              setProfileCache(merged)
+              setMessages(prev => prev.map(m =>
+                m.id === newMsg.id ? { ...m, ...merged[m.user_id] } : m
+              ))
             })
             return cache
           })
         })
         .subscribe()
 
-      return () => { channel.unsubscribe() }
+      cleanup = () => { channel.unsubscribe() }
     }
 
     init()
-    return () => { mounted = false }
-  }, [supabase, router, enrichMessages])
+    return () => { cleanup?.() }
+  }, [supabase, router, fetchProfiles])
 
+  // Auto-scroll on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages.length])
 
   async function sendMessage() {
     const text = input.trim()
@@ -183,17 +171,39 @@ export default function ChatPage() {
       return
     }
 
-    setSending(true)
-    const { error } = await supabase.from('messages').insert({
+    // Optimistic — show message instantly before server confirms
+    const tempId = `temp-${Date.now()}`
+    const optimistic: Message = {
+      id: tempId,
       user_id: userId,
       content: text,
-    })
-    if (!error) setInput('')
-    setSending(false)
+      created_at: new Date().toISOString(),
+      ...profileCache[userId],
+    }
+    setMessages(prev => [...prev, optimistic])
+    setInput('')
     inputRef.current?.focus()
+
+    setSending(true)
+    const { data, error } = await supabase.from('messages').insert({
+      user_id: userId,
+      content: text,
+    }).select().maybeSingle()
+
+    setSending(false)
+
+    if (error) {
+      // Remove optimistic on error
+      setMessages(prev => prev.filter(m => m.id !== tempId))
+      setInput(text)
+    } else if (data) {
+      // Replace temp with real
+      setMessages(prev => prev.map(m =>
+        m.id === tempId ? { ...data, ...profileCache[userId] } : m
+      ))
+    }
   }
 
-  // Not Plus — show gate
   if (isPlus === false) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 text-center">
@@ -211,7 +221,6 @@ export default function ChatPage() {
     )
   }
 
-  // Loading
   if (isPlus === null) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -222,7 +231,6 @@ export default function ChatPage() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-112px)] max-w-lg mx-auto w-full overflow-x-hidden">
-
       {/* Header */}
       <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
         <div>
@@ -248,13 +256,23 @@ export default function ChatPage() {
 
         {messages.map((msg, i) => {
           const isMe = msg.user_id === userId
-          const showName = i === 0 || messages[i - 1].user_id !== msg.user_id
+          const showName = !isMe && (i === 0 || messages[i - 1].user_id !== msg.user_id)
+          const lostSoFar = msg.start_weight && msg.current_weight
+            ? parseFloat((msg.start_weight - msg.current_weight).toFixed(1))
+            : null
 
           return (
             <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-              {showName && !isMe && (
-                <div className="mb-1 ml-1">
-                  <UserBadge msg={msg} />
+              {showName && (
+                <div className="flex items-center gap-1.5 mb-1 ml-1 flex-wrap">
+                  <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+                    {msg.display_name || msg.username || 'Member'}
+                  </span>
+                  {lostSoFar !== null && lostSoFar > 0 && (
+                    <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
+                      −{lostSoFar} {msg.weight_unit || 'lbs'}
+                    </span>
+                  )}
                 </div>
               )}
               <div
@@ -265,6 +283,8 @@ export default function ChatPage() {
                   border: isMe ? 'none' : '1px solid var(--border)',
                   borderBottomRightRadius: isMe ? 4 : undefined,
                   borderBottomLeftRadius: !isMe ? 4 : undefined,
+                  opacity: msg.id.startsWith('temp-') ? 0.7 : 1,
+                  transition: 'opacity 0.2s',
                 }}
               >
                 {msg.content}
@@ -294,7 +314,7 @@ export default function ChatPage() {
             placeholder="Ask about workouts, meals, progress…"
             value={input}
             onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && sendMessage()}
+            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
             maxLength={500}
           />
           <button
