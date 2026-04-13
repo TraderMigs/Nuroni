@@ -81,7 +81,7 @@ export default function ChatPage() {
   const [profileCache, setProfileCache] = useState<Record<string, Partial<Message>>>({})
 
   const enrichMessages = useCallback(async (msgs: Message[], cache: Record<string, Partial<Message>>) => {
-    const unknownIds = [...new Set(msgs.map(m => m.user_id))].filter(id => !cache[id])
+    const unknownIds = Array.from(new Set(msgs.map(m => m.user_id))).filter(id => !cache[id])
     if (unknownIds.length > 0) {
       const { data: profiles } = await supabase
         .from('profiles')
