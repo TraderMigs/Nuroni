@@ -21,13 +21,12 @@ export default function SignupPage() {
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: `${window.location.origin}/onboarding` },
     })
     if (error) {
       setError(error.message)
       setLoading(false)
     } else {
-      setDone(true)
+      window.location.href = '/onboarding'
     }
   }
 
