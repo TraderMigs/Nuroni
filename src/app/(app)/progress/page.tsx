@@ -20,7 +20,7 @@ function Toast({ msg, onDone }: { msg: string; onDone: () => void }) {
 function computeStreak(entries: Entry[]): number {
   if (!entries.length) return 0
   const days = entries.map(e => new Date(e.created_at).toDateString())
-  const unique = [...new Set(days)]
+  const unique = Array.from(new Set(days))
   let streak = 1
   const today = new Date().toDateString()
   const yesterday = new Date(Date.now() - 86400000).toDateString()
