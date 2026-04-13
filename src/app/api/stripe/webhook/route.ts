@@ -4,7 +4,6 @@ import { createClient } from '@supabase/supabase-js'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' })
 
-// Use service role for webhook — bypasses RLS
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -27,26 +26,48 @@ export async function POST(req: NextRequest) {
     return typeof c === 'string' ? c : c.id
   }
 
-  async function getUserIdFromCustomer(customerId: string): Promise<string | null> {
-    const { data } = await supabaseAdmin
-      .from('profiles')
-      .select('id')
-      .eq('stripe_customer_id', customerId)
-      .maybeSingle()
-    return data?.id ?? null
+  // Primary lookup by stripe_customer_id
+  // Fallback to metadata.supabase_user_id if no match
+  async function getUserId(customerId: string | null, metadata?: Stripe.Metadata | null): Promise<string | null> {
+    if (customerId) {
+      const { data } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .eq('stripe_customer_id', customerId)
+        .maybeSingle()
+      if (data?.id) return data.id
+    }
+
+    // Fallback — use metadata user ID if customer lookup failed
+    const metaUserId = metadata?.supabase_user_id
+    if (metaUserId) {
+      const { data } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .eq('id', metaUserId)
+        .maybeSingle()
+      if (data?.id) return data.id
+    }
+
+    return null
   }
 
   switch (event.type) {
     case 'checkout.session.completed': {
       const session = event.data.object as Stripe.Checkout.Session
       const customerId = getCustomerId(session)
-      if (!customerId) break
-      const userId = await getUserIdFromCustomer(customerId)
+      const userId = await getUserId(customerId, session.metadata)
       if (!userId) break
-      const subId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id
+
+      const subId = typeof session.subscription === 'string'
+        ? session.subscription
+        : session.subscription?.id
+
+      // Belt-and-suspenders: always write stripe_customer_id in case it was missing
       await supabaseAdmin.from('profiles').update({
         is_plus: true,
-        stripe_subscription_id: subId,
+        stripe_subscription_id: subId ?? null,
+        stripe_customer_id: customerId,
         plus_expires_at: null,
       }).eq('id', userId)
       break
@@ -56,8 +77,7 @@ export async function POST(req: NextRequest) {
     case 'customer.subscription.paused': {
       const sub = event.data.object as Stripe.Subscription
       const customerId = getCustomerId(sub)
-      if (!customerId) break
-      const userId = await getUserIdFromCustomer(customerId)
+      const userId = await getUserId(customerId, sub.metadata)
       if (!userId) break
       await supabaseAdmin.from('profiles').update({
         is_plus: false,
@@ -70,12 +90,12 @@ export async function POST(req: NextRequest) {
     case 'customer.subscription.updated': {
       const sub = event.data.object as Stripe.Subscription
       const customerId = getCustomerId(sub)
-      if (!customerId) break
-      const userId = await getUserIdFromCustomer(customerId)
+      const userId = await getUserId(customerId, sub.metadata)
       if (!userId) break
       const isActive = sub.status === 'active' || sub.status === 'trialing'
       await supabaseAdmin.from('profiles').update({
         is_plus: isActive,
+        stripe_customer_id: customerId,
       }).eq('id', userId)
       break
     }
