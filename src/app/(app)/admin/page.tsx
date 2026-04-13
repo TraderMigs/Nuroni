@@ -110,14 +110,18 @@ export default function AdminPage() {
   useEffect(() => { load() }, [load])
 
   async function togglePlus(userId: string, current: boolean) {
-    const { error } = await supabase
-      .from('profiles')
-      .update({ is_plus: !current, stripe_subscription_id: null })
-      .eq('id', userId)
-    if (!error) {
+    const res = await fetch('/api/admin/toggle-plus', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_user_id: userId, is_plus: !current }),
+    })
+    const data = await res.json()
+    if (data.ok) {
       setToast(`Plus+ ${!current ? 'enabled' : 'removed'}`)
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_plus: !current } : u))
       if (stats) setStats({ ...stats, plusUsers: stats.plusUsers + (!current ? 1 : -1), mrr: (stats.plusUsers + (!current ? 1 : -1)) * 5 })
+    } else {
+      setToast('Error: ' + (data.error || 'Failed'))
     }
   }
 
