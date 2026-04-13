@@ -8,12 +8,14 @@ export default function SignupPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [agreed, setAgreed] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
   const supabase = createClient()
 
   async function handleSignup() {
+    if (!agreed) { setError('Please confirm you are 18+ and agree to our Terms and Privacy Policy.'); return }
     setLoading(true)
     setError('')
     const { error } = await supabase.auth.signUp({
@@ -40,15 +42,13 @@ export default function SignupPage() {
         <h2 className="text-lg font-bold mb-2" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
           Check your email
         </h2>
-        <p className="text-sm mb-2" style={{ color: 'var(--text-secondary)' }}>
-          We sent a confirmation link to:
-        </p>
+        <p className="text-sm mb-2" style={{ color: 'var(--text-secondary)' }}>We sent a confirmation link to:</p>
         <p className="text-sm font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>{email}</p>
         <p className="text-sm mb-5" style={{ color: 'var(--text-secondary)' }}>
           Click the link in that email to activate your account and start your journey.
         </p>
         <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-          Didn't get it? Check your spam folder or{' '}
+          Didn&apos;t get it? Check your spam folder or{' '}
           <button onClick={() => setDone(false)} className="underline" style={{ color: 'var(--accent-text)' }}>try again</button>.
         </p>
       </div>
@@ -108,6 +108,37 @@ export default function SignupPage() {
           </div>
         </div>
 
+        {/* 18+ + TOS checkbox */}
+        <label className="flex items-start gap-3 cursor-pointer">
+          <div className="relative flex-shrink-0 mt-0.5">
+            <input
+              type="checkbox"
+              className="sr-only"
+              checked={agreed}
+              onChange={e => setAgreed(e.target.checked)}
+            />
+            <div
+              className="w-5 h-5 rounded flex items-center justify-center transition-colors"
+              style={{
+                background: agreed ? 'var(--accent)' : 'var(--bg-input)',
+                border: `2px solid ${agreed ? 'var(--accent)' : 'var(--border)'}`,
+              }}
+            >
+              {agreed && (
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                  <path d="M2 6l3 3 5-5" stroke="#0D1117" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              )}
+            </div>
+          </div>
+          <span className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+            I confirm I am 18 years of age or older and agree to the{' '}
+            <Link href="/terms" target="_blank" style={{ color: 'var(--accent-text)', fontWeight: 500 }}>Terms of Service</Link>
+            {' '}and{' '}
+            <Link href="/privacy" target="_blank" style={{ color: 'var(--accent-text)', fontWeight: 500 }}>Privacy Policy</Link>
+          </span>
+        </label>
+
         {error && (
           <p className="text-sm px-3 py-2 rounded-lg" style={{ color: 'var(--danger)', background: 'rgba(239,68,68,0.08)' }}>
             {error}
@@ -117,7 +148,7 @@ export default function SignupPage() {
         <button
           className="btn-primary w-full"
           onClick={handleSignup}
-          disabled={loading || !email || !password}
+          disabled={loading || !email || !password || !agreed}
         >
           {loading ? 'Creating account…' : 'Create account'}
         </button>

@@ -118,6 +118,11 @@ export default function LandingPage() {
         <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
           © {new Date().getFullYear()} Nuroni · Track less. Show real progress.
         </p>
+        <div style={{ display: 'flex', gap: '1rem', marginTop: '0.25rem' }}>
+          <a href="/terms" style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textDecoration: 'none' }}>Terms</a>
+          <a href="/privacy" style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textDecoration: 'none' }}>Privacy</a>
+          <a href="mailto:nuroniapp@gmail.com" style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textDecoration: 'none' }}>Support</a>
+        </div>
       </footer>
 
       <style>{`

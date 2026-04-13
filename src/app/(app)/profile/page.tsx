@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 
 function Toast({ msg, onDone }: { msg: string; onDone: () => void }) {
   useEffect(() => { const t = setTimeout(onDone, 2500); return () => clearTimeout(t) }, [onDone])
@@ -177,6 +178,20 @@ export default function ProfilePage() {
           {saving ? 'Saving…' : 'Save profile'}
         </button>
       </div>
+
+      <Link
+        href="/settings"
+        className="card p-4 mt-4 flex items-center justify-between"
+        style={{ textDecoration: 'none', display: 'flex' }}
+      >
+        <div>
+          <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Account settings</p>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Legal, support, delete account</p>
+        </div>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+      </Link>
     </div>
   )
 }
