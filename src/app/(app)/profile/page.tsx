@@ -14,8 +14,10 @@ export default function ProfilePage() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [portalLoading, setPortalLoading] = useState(false)
   const [toast, setToast] = useState('')
   const [userId, setUserId] = useState('')
+  const [isPlus, setIsPlus] = useState(false)
 
   const [form, setForm] = useState({
     display_name: '',
@@ -32,15 +34,18 @@ export default function ProfilePage() {
     if (!user) { router.push('/login'); return }
     setUserId(user.id)
     const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
-    if (p) setForm({
-      display_name: p.display_name || '',
-      username: p.username || '',
-      height: p.height ? String(p.height) : '',
-      weight_unit: p.weight_unit || 'lbs',
-      distance_unit: p.distance_unit || 'miles',
-      start_weight: p.start_weight ? String(p.start_weight) : '',
-      is_public: p.is_public ?? true,
-    })
+    if (p) {
+      setIsPlus(p.is_plus || false)
+      setForm({
+        display_name: p.display_name || '',
+        username: p.username || '',
+        height: p.height ? String(p.height) : '',
+        weight_unit: p.weight_unit || 'lbs',
+        distance_unit: p.distance_unit || 'miles',
+        start_weight: p.start_weight ? String(p.start_weight) : '',
+        is_public: p.is_public ?? true,
+      })
+    }
     setLoading(false)
   }, [supabase, router])
 
@@ -60,6 +65,14 @@ export default function ProfilePage() {
     })
     setSaving(false)
     if (!error) setToast('Profile saved ✓')
+  }
+
+  async function handlePortal() {
+    setPortalLoading(true)
+    const res = await fetch('/api/stripe/portal', { method: 'POST' })
+    const data = await res.json()
+    if (data.url) window.location.href = data.url
+    else setPortalLoading(false)
   }
 
   function copyLink() {
@@ -82,16 +95,35 @@ export default function ProfilePage() {
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Your identity and setup</p>
       </div>
 
-      {/* Public link card */}
+      {/* Subscription status */}
+      {isPlus ? (
+        <div className="card p-4 mb-4 flex items-center justify-between" style={{ border: '1.5px solid var(--accent)' }}>
+          <div>
+            <p className="text-sm font-bold" style={{ color: 'var(--accent)', fontFamily: 'var(--font-display)' }}>✦ Plus+ Active</p>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>All features unlocked</p>
+          </div>
+          <button onClick={handlePortal} disabled={portalLoading} className="btn-secondary py-1.5 px-3 text-xs">
+            {portalLoading ? '…' : 'Manage'}
+          </button>
+        </div>
+      ) : (
+        <button onClick={() => router.push('/plus')} className="card p-4 mb-4 w-full text-left flex items-center justify-between" style={{ cursor: 'pointer', border: '1px dashed var(--border)' }}>
+          <div>
+            <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-display)' }}>Upgrade to Plus+</p>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>$5/month · cancel anytime</p>
+          </div>
+          <span className="text-xs font-bold px-2.5 py-1 rounded-lg" style={{ background: 'var(--accent)', color: '#0D1117' }}>✦</span>
+        </button>
+      )}
+
+      {/* Public link */}
       {form.username && (
         <div className="card p-4 mb-4 flex items-center justify-between">
           <div>
             <p className="text-xs font-medium mb-0.5" style={{ color: 'var(--text-muted)' }}>Your public link</p>
             <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>nuroni.app/u/{form.username}</p>
           </div>
-          <button onClick={copyLink} className="btn-secondary py-1.5 px-3 text-xs">
-            Copy
-          </button>
+          <button onClick={copyLink} className="btn-secondary py-1.5 px-3 text-xs">Copy</button>
         </div>
       )}
 
@@ -100,20 +132,13 @@ export default function ProfilePage() {
           <label className="label">Display name</label>
           <input className="input-base" placeholder="Alex" value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} />
         </div>
-
         <div>
           <label className="label">Username</label>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-muted)' }}>@</span>
-            <input
-              className="input-base pl-7"
-              placeholder="alexfit"
-              value={form.username}
-              onChange={e => setForm(f => ({ ...f, username: e.target.value.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase() }))}
-            />
+            <input className="input-base pl-7" placeholder="alexfit" value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase() }))} />
           </div>
         </div>
-
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="label">Weight unit</label>
@@ -130,36 +155,24 @@ export default function ProfilePage() {
             </select>
           </div>
         </div>
-
         <div>
           <label className="label">Height ({form.weight_unit === 'lbs' ? 'inches' : 'cm'}) <span style={{ color: 'var(--text-muted)' }}>(optional)</span></label>
           <input className="input-base" type="number" step="0.1" placeholder={form.weight_unit === 'lbs' ? '68' : '173'} value={form.height} onChange={e => setForm(f => ({ ...f, height: e.target.value }))} />
         </div>
-
         <div>
           <label className="label">Starting weight ({form.weight_unit})</label>
           <input className="input-base" type="number" step="0.1" placeholder="185" value={form.start_weight} onChange={e => setForm(f => ({ ...f, start_weight: e.target.value }))} />
-          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>This is your baseline — changing it recalculates your total progress.</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Changing this recalculates your total progress.</p>
         </div>
-
-        {/* Public toggle */}
         <div className="flex items-center justify-between p-3 rounded-xl" style={{ background: 'var(--bg-input)' }}>
           <div>
             <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Public profile</p>
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Anyone with your link can see your progress</p>
           </div>
-          <button
-            onClick={() => setForm(f => ({ ...f, is_public: !f.is_public }))}
-            className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors"
-            style={{ background: form.is_public ? 'var(--accent)' : 'var(--border)' }}
-          >
-            <span
-              className="inline-block h-4 w-4 rounded-full bg-white transition-transform"
-              style={{ transform: form.is_public ? 'translateX(24px)' : 'translateX(4px)' }}
-            />
+          <button onClick={() => setForm(f => ({ ...f, is_public: !f.is_public }))} className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors" style={{ background: form.is_public ? 'var(--accent)' : 'var(--border)' }}>
+            <span className="inline-block h-4 w-4 rounded-full bg-white transition-transform" style={{ transform: form.is_public ? 'translateX(24px)' : 'translateX(4px)' }} />
           </button>
         </div>
-
         <button className="btn-primary w-full" onClick={save} disabled={saving || !form.display_name || !form.username}>
           {saving ? 'Saving…' : 'Save profile'}
         </button>

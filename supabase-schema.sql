@@ -116,3 +116,19 @@ create trigger set_profiles_updated_at
 create trigger set_goals_updated_at
   before update on public.goals
   for each row execute function public.handle_updated_at();
+
+-- ============================================
+-- PHASE 2: PLUS+ SUBSCRIPTION
+-- Run this in Supabase SQL Editor
+-- ============================================
+
+-- Add plus subscription fields to profiles
+alter table public.profiles
+  add column if not exists is_plus boolean default false,
+  add column if not exists stripe_customer_id text,
+  add column if not exists stripe_subscription_id text,
+  add column if not exists plus_expires_at timestamptz;
+
+-- Add notes field to entries
+alter table public.entries
+  add column if not exists note text;

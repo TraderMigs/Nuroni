@@ -4,19 +4,18 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine
 } from 'recharts'
 
-interface Profile { display_name: string; username: string; weight_unit: string; distance_unit: string; start_weight: number; is_public: boolean }
+interface Profile { display_name: string; username: string; weight_unit: string; distance_unit: string; start_weight: number; is_public: boolean; is_plus: boolean }
 interface Goal { goal_weight: number; daily_step_goal: number; target_date: string | null }
-interface Entry { id: string; weight: number; steps: number; distance: number | null; created_at: string }
+interface Entry { id: string; weight: number; steps: number; distance: number | null; note: string | null; created_at: string }
 
 function Toast({ msg, onDone }: { msg: string; onDone: () => void }) {
   useEffect(() => { const t = setTimeout(onDone, 2500); return () => clearTimeout(t) }, [onDone])
   return <div className="toast">{msg}</div>
 }
 
-// Compute streak from entries (consecutive days logged)
 function computeStreak(entries: Entry[]): number {
   if (!entries.length) return 0
   const days = entries.map(e => new Date(e.created_at).toDateString())
@@ -35,7 +34,6 @@ function computeStreak(entries: Entry[]): number {
   return streak
 }
 
-// Weekly summary: last 7 days of entries
 function getWeeklySummary(entries: Entry[], unit: string) {
   const cutoff = new Date(Date.now() - 7 * 86400000)
   const week = entries.filter(e => new Date(e.created_at) >= cutoff)
@@ -47,7 +45,6 @@ function getWeeklySummary(entries: Entry[], unit: string) {
   return { change, avgSteps, days: week.length }
 }
 
-// Milestone checks
 function getMilestone(lostSoFar: number, unit: string, pctToGoal: number): string | null {
   if (pctToGoal >= 100) return `🏆 You reached your goal! Incredible work.`
   if (pctToGoal >= 75) return `🔥 75% of the way there — keep pushing!`
@@ -58,6 +55,44 @@ function getMilestone(lostSoFar: number, unit: string, pctToGoal: number): strin
   if (lostSoFar >= 5) return `✨ 5 ${unit} lost — you're doing it!`
   if (lostSoFar >= 1) return `🌱 First pound down — the journey begins!`
   return null
+}
+
+// Smoothed trend line (7-day rolling average)
+function smoothData(data: { date: string; weight: number }[]) {
+  return data.map((d, i) => {
+    const slice = data.slice(Math.max(0, i - 3), i + 4)
+    const avg = parseFloat((slice.reduce((s, x) => s + x.weight, 0) / slice.length).toFixed(1))
+    return { ...d, trend: avg }
+  })
+}
+
+// Pace tracker: weeks to goal at current rate
+function getPace(entries: Entry[], goalWeight: number): string | null {
+  if (entries.length < 7) return null
+  const recent = entries.slice(0, 7)
+  const oldest = recent[recent.length - 1].weight
+  const newest = recent[0].weight
+  const weeklyLoss = (oldest - newest) / (7 / 7)
+  if (weeklyLoss <= 0) return null
+  const remaining = newest - goalWeight
+  if (remaining <= 0) return 'You\'ve already hit your goal! 🎯'
+  const weeks = Math.ceil(remaining / weeklyLoss)
+  if (weeks > 200) return null
+  const target = new Date(Date.now() + weeks * 7 * 86400000)
+  return `At your current pace, goal in ~${weeks} week${weeks === 1 ? '' : 's'} (${target.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })})`
+}
+
+function PlusGate({ onUpgrade }: { onUpgrade: () => void }) {
+  return (
+    <div className="card p-4 text-center" style={{ border: '1px dashed var(--border)' }}>
+      <div className="text-2xl mb-2">✦</div>
+      <p className="text-sm font-semibold mb-1" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-display)' }}>Plus+ feature</p>
+      <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>Upgrade to unlock this and more for $5/month.</p>
+      <button onClick={onUpgrade} className="btn-primary text-sm py-2 px-4">
+        Upgrade to Plus+ →
+      </button>
+    </div>
+  )
 }
 
 export default function ProgressPage() {
@@ -71,6 +106,8 @@ export default function ProgressPage() {
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState('')
   const [showWeekly, setShowWeekly] = useState(false)
+  const [noteInput, setNoteInput] = useState('')
+  const [exportLoading, setExportLoading] = useState(false)
 
   const [weightInput, setWeightInput] = useState('')
   const [stepsInput, setStepsInput] = useState('')
@@ -106,11 +143,13 @@ export default function ProgressPage() {
       weight: parseFloat(weightInput),
       steps: stepsInput ? parseInt(stepsInput) : 0,
       distance: distanceInput ? parseFloat(distanceInput) : null,
+      note: noteInput || null,
     })
     if (!error) {
       setToast('Entry logged ✓')
       setStepsInput('')
       setDistanceInput('')
+      setNoteInput('')
       await load()
     }
     setSaving(false)
@@ -130,6 +169,30 @@ export default function ProgressPage() {
     } else { copyLink() }
   }
 
+  function exportCSV() {
+    setExportLoading(true)
+    const rows = [['Date', 'Weight', 'Steps', 'Distance', 'Note']]
+    entries.forEach(e => {
+      rows.push([
+        new Date(e.created_at).toLocaleDateString(),
+        String(e.weight),
+        String(e.steps || 0),
+        String(e.distance || ''),
+        e.note || '',
+      ])
+    })
+    const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `nuroni-progress-${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    setExportLoading(false)
+    setToast('CSV downloaded!')
+  }
+
   if (loading) return (
     <div className="flex items-center justify-center min-h-screen">
       <div className="w-6 h-6 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
@@ -138,6 +201,7 @@ export default function ProgressPage() {
 
   if (!profile || !goal) return null
 
+  const isPlus = profile.is_plus
   const currentWeight = entries[0]?.weight ?? profile.start_weight
   const lostSoFar = parseFloat((profile.start_weight - currentWeight).toFixed(1))
   const totalToLose = profile.start_weight - goal.goal_weight
@@ -148,11 +212,13 @@ export default function ProgressPage() {
   const streak = computeStreak(entries)
   const milestone = getMilestone(lostSoFar, unit, pctToGoal)
   const weekly = getWeeklySummary(entries, unit)
+  const pace = isPlus ? getPace(entries, goal.goal_weight) : null
 
-  const chartData = [...entries].reverse().slice(-14).map(e => ({
+  const rawChartData = [...entries].reverse().slice(-14).map(e => ({
     date: new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     weight: e.weight,
   }))
+  const chartData = isPlus ? smoothData(rawChartData) : rawChartData
 
   return (
     <div className="w-full max-w-lg mx-auto px-4 py-5 space-y-5 overflow-x-hidden">
@@ -161,9 +227,16 @@ export default function ProgressPage() {
       {/* Header */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold truncate" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-            {profile.display_name}
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold truncate" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+              {profile.display_name}
+            </h1>
+            {isPlus && (
+              <span className="text-xs px-2 py-0.5 rounded-full font-bold flex-shrink-0" style={{ background: 'var(--accent)', color: '#0D1117' }}>
+                Plus+
+              </span>
+            )}
+          </div>
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Your progress</p>
         </div>
         <div className="flex gap-2 flex-shrink-0">
@@ -190,9 +263,8 @@ export default function ProgressPage() {
         </div>
       )}
 
-      {/* Streak + Weekly row */}
+      {/* Streak + Weekly */}
       <div className="grid grid-cols-2 gap-3">
-        {/* Streak */}
         <div className="stat-card flex items-center gap-3">
           <div className="text-2xl">{streak >= 7 ? '🔥' : streak >= 3 ? '⚡' : '📅'}</div>
           <div>
@@ -201,12 +273,7 @@ export default function ProgressPage() {
           </div>
         </div>
 
-        {/* Weekly summary toggle */}
-        <button
-          className="stat-card text-left"
-          onClick={() => setShowWeekly(v => !v)}
-          style={{ cursor: 'pointer' }}
-        >
+        <button className="stat-card text-left" onClick={() => setShowWeekly(v => !v)} style={{ cursor: 'pointer' }}>
           <div className="flex items-center justify-between mb-1">
             <span className="stat-label">This week</span>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', transform: showWeekly ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
@@ -223,12 +290,10 @@ export default function ProgressPage() {
         </button>
       </div>
 
-      {/* Weekly expanded summary */}
+      {/* Weekly expanded */}
       {showWeekly && weekly && (
         <div className="card p-4 animate-fade-in">
-          <h3 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-            Weekly summary
-          </h3>
+          <h3 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Weekly summary</h3>
           <div className="grid grid-cols-3 gap-3 text-center">
             <div>
               <div className="text-lg font-bold" style={{ color: weekly.change > 0 ? 'var(--success)' : 'var(--danger)', fontFamily: 'var(--font-display)' }}>
@@ -237,32 +302,32 @@ export default function ProgressPage() {
               <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{unit} this week</div>
             </div>
             <div>
-              <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-                {weekly.avgSteps.toLocaleString()}
-              </div>
+              <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{weekly.avgSteps.toLocaleString()}</div>
               <div className="text-xs" style={{ color: 'var(--text-muted)' }}>avg steps/day</div>
             </div>
             <div>
-              <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-                {weekly.days}
-              </div>
+              <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{weekly.days}</div>
               <div className="text-xs" style={{ color: 'var(--text-muted)' }}>days logged</div>
             </div>
           </div>
           <button
             onClick={async () => {
               const text = `📊 My Nuroni week:\n${weekly.change > 0 ? `−${weekly.change}` : `+${Math.abs(weekly.change)}`} ${unit} · ${weekly.avgSteps.toLocaleString()} avg steps · ${weekly.days} days logged\n\nnuroni.app/u/${profile.username}`
-              if (navigator.share) {
-                await navigator.share({ text })
-              } else {
-                await navigator.clipboard.writeText(text)
-                setToast('Weekly summary copied!')
-              }
+              if (navigator.share) await navigator.share({ text })
+              else { await navigator.clipboard.writeText(text); setToast('Weekly summary copied!') }
             }}
             className="btn-secondary w-full mt-3 text-sm"
           >
             Share weekly summary
           </button>
+        </div>
+      )}
+
+      {/* Pace tracker — Plus+ */}
+      {isPlus && pace && (
+        <div className="card p-3.5 flex items-center gap-3" style={{ background: 'var(--accent-subtle)', borderColor: 'rgba(45,212,191,0.2)' }}>
+          <span className="text-lg">⏱️</span>
+          <p className="text-sm" style={{ color: 'var(--accent-text)' }}>{pace}</p>
         </div>
       )}
 
@@ -284,31 +349,20 @@ export default function ProgressPage() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="stat-card">
-          <div className="stat-value">{currentWeight}</div>
-          <div className="stat-label">Current {unit}</div>
-        </div>
+        <div className="stat-card"><div className="stat-value">{currentWeight}</div><div className="stat-label">Current {unit}</div></div>
         <div className="stat-card">
           <div className="stat-value" style={{ color: lostSoFar > 0 ? 'var(--success)' : 'var(--text-primary)' }}>
             {lostSoFar > 0 ? `−${lostSoFar}` : lostSoFar === 0 ? '0' : `+${Math.abs(lostSoFar)}`}
           </div>
           <div className="stat-label">Lost ({unit})</div>
         </div>
-        <div className="stat-card">
-          <div className="stat-value">{latestSteps.toLocaleString()}</div>
-          <div className="stat-label">Latest steps</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value">{goal.daily_step_goal.toLocaleString()}</div>
-          <div className="stat-label">Step goal</div>
-        </div>
+        <div className="stat-card"><div className="stat-value">{latestSteps.toLocaleString()}</div><div className="stat-label">Latest steps</div></div>
+        <div className="stat-card"><div className="stat-value">{goal.daily_step_goal.toLocaleString()}</div><div className="stat-label">Step goal</div></div>
       </div>
 
       {/* Log entry */}
       <div className="card p-4">
-        <h2 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-          Log today
-        </h2>
+        <h2 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Log today</h2>
         <div className="grid grid-cols-3 gap-2 mb-3">
           <div>
             <label className="label">Weight ({unit})</label>
@@ -323,17 +377,28 @@ export default function ProgressPage() {
             <input className="input-base" type="number" step="0.01" placeholder="0.0" value={distanceInput} onChange={e => setDistanceInput(e.target.value)} />
           </div>
         </div>
+
+        {/* Note field — Plus+ only */}
+        {isPlus && (
+          <div className="mb-3">
+            <label className="label">Note <span style={{ color: 'var(--text-muted)' }}>(optional)</span></label>
+            <input className="input-base" placeholder="How are you feeling today?" value={noteInput} onChange={e => setNoteInput(e.target.value)} />
+          </div>
+        )}
+
         <button className="btn-primary w-full" onClick={logEntry} disabled={saving || !weightInput}>
           {saving ? 'Saving…' : 'Log entry'}
         </button>
       </div>
 
-      {/* Chart */}
+      {/* Chart — Plus+ shows trend line */}
       {chartData.length > 1 && (
         <div className="card p-4 overflow-hidden">
-          <h2 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-            Weight trend
-          </h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+              Weight trend {isPlus && <span className="text-xs ml-1" style={{ color: 'var(--accent)' }}>+ smoothed</span>}
+            </h2>
+          </div>
           <ResponsiveContainer width="100%" height={160}>
             <LineChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -345,34 +410,52 @@ export default function ProgressPage() {
                 itemStyle={{ color: 'var(--accent)' }}
               />
               <Line type="monotone" dataKey="weight" stroke="var(--accent)" strokeWidth={2} dot={{ r: 3, fill: 'var(--accent)' }} activeDot={{ r: 5 }} />
+              {isPlus && <Line type="monotone" dataKey="trend" stroke="rgba(45,212,191,0.4)" strokeWidth={1.5} strokeDasharray="4 2" dot={false} />}
+              <ReferenceLine y={goal.goal_weight} stroke="var(--success)" strokeDasharray="3 3" strokeWidth={1} />
             </LineChart>
           </ResponsiveContainer>
         </div>
       )}
 
+      {/* Plus+ upsell for pace if not plus */}
+      {!isPlus && entries.length >= 7 && (
+        <PlusGate onUpgrade={() => router.push('/plus')} />
+      )}
+
+      {/* Export CSV — Plus+ */}
+      {isPlus && entries.length > 0 && (
+        <button onClick={exportCSV} disabled={exportLoading} className="btn-secondary w-full text-sm gap-2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          {exportLoading ? 'Exporting…' : 'Export as CSV'}
+        </button>
+      )}
+
       {/* History */}
       {entries.length > 0 && (
         <div className="card p-4">
-          <h2 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-            History
-          </h2>
+          <h2 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>History</h2>
           <div className="space-y-2">
             {entries.slice(0, 10).map((entry, i) => (
-              <div key={entry.id} className="flex items-center justify-between py-2 border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
-                <div className="flex items-center gap-2 min-w-0">
-                  {i === 0 && (
-                    <span className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
-                      Latest
+              <div key={entry.id} className="py-2 border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {i === 0 && (
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>Latest</span>
+                    )}
+                    <span className="text-sm truncate" style={{ color: 'var(--text-secondary)' }}>
+                      {new Date(entry.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </span>
-                  )}
-                  <span className="text-sm truncate" style={{ color: 'var(--text-secondary)' }}>
-                    {new Date(entry.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </span>
+                  </div>
+                  <div className="flex items-center gap-3 text-sm flex-shrink-0">
+                    <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{entry.weight} {unit}</span>
+                    {entry.steps > 0 && <span style={{ color: 'var(--text-muted)' }}>{entry.steps.toLocaleString()}</span>}
+                  </div>
                 </div>
-                <div className="flex items-center gap-3 text-sm flex-shrink-0">
-                  <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{entry.weight} {unit}</span>
-                  {entry.steps > 0 && <span style={{ color: 'var(--text-muted)' }}>{entry.steps.toLocaleString()}</span>}
-                </div>
+                {entry.note && (
+                  <p className="text-xs mt-1 ml-0" style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>"{entry.note}"</p>
+                )}
               </div>
             ))}
           </div>
@@ -383,6 +466,18 @@ export default function ProgressPage() {
         <div className="text-center py-8" style={{ color: 'var(--text-muted)' }}>
           <p className="text-sm">Log your first entry above to get started.</p>
         </div>
+      )}
+
+      {/* Plus upsell at bottom for free users */}
+      {!isPlus && (
+        <button onClick={() => router.push('/plus')} className="w-full card p-4 text-center" style={{ border: '1px solid var(--accent)', cursor: 'pointer' }}>
+          <p className="text-sm font-semibold" style={{ color: 'var(--accent)', fontFamily: 'var(--font-display)' }}>
+            ✦ Upgrade to Plus+ — $5/month
+          </p>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+            Trend line · Pace tracker · Notes · Export · Community
+          </p>
+        </button>
       )}
     </div>
   )
