@@ -16,6 +16,18 @@ interface Message {
   weight_unit?: string
   start_weight?: number
   current_weight?: number
+  is_admin?: boolean
+}
+
+interface ProfileModal {
+  user_id: string
+  display_name: string
+  username: string
+  start_weight: number
+  current_weight: number
+  goal_weight: number | null
+  weight_unit: string
+  follower_count: number
 }
 
 const BLOCKED_PATTERNS = [
@@ -38,35 +50,17 @@ function formatTime(ts: string): string {
   return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
-// Render message content — makes URLs and emails clickable for admin messages
 function MessageContent({ content, isAdmin, isMe }: { content: string; isAdmin: boolean; isMe: boolean }) {
   if (!isAdmin || !content) return <span>{content}</span>
-
-  // Parse URLs and emails into clickable links
   const urlRegex = /(https?:\/\/[^\s]+|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|www\.[^\s]+)/g
   const parts = content.split(urlRegex)
-
   return (
     <>
       {parts.map((part, i) => {
         if (urlRegex.test(part)) {
           urlRegex.lastIndex = 0
           const href = part.startsWith('http') ? part : part.includes('@') ? `mailto:${part}` : `https://${part}`
-          return (
-            <a
-              key={i}
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                color: isMe ? '#0D1117' : 'var(--accent)',
-                textDecoration: 'underline',
-                wordBreak: 'break-all',
-              }}
-            >
-              {part}
-            </a>
-          )
+          return <a key={i} href={href} target="_blank" rel="noopener noreferrer" style={{ color: isMe ? '#0D1117' : 'var(--accent)', textDecoration: 'underline', wordBreak: 'break-all' }}>{part}</a>
         }
         return <span key={i}>{part}</span>
       })}
@@ -90,6 +84,9 @@ export default function ChatPage() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [userId, setUserId] = useState('')
   const [profileCache, setProfileCache] = useState<Record<string, Partial<Message>>>({})
+  const [followedIds, setFollowedIds] = useState<Set<string>>(new Set())
+  const [profileModal, setProfileModal] = useState<ProfileModal | null>(null)
+  const [followLoading, setFollowLoading] = useState(false)
 
   const fetchProfiles = useCallback(async (userIds: string[]) => {
     const { data: profiles } = await supabase
@@ -106,17 +103,18 @@ export default function ChatPage() {
     const latestWeights: Record<string, number> = {}
     entries?.forEach(e => { if (!latestWeights[e.user_id]) latestWeights[e.user_id] = e.weight })
 
-    const newEntries: Record<string, Partial<Message>> = {}
+    const result: Record<string, Partial<Message>> = {}
     profiles?.forEach(p => {
-      newEntries[p.id] = {
+      result[p.id] = {
         display_name: p.display_name,
         username: p.username,
         weight_unit: p.weight_unit,
         start_weight: p.start_weight,
         current_weight: latestWeights[p.id],
+        is_admin: p.is_admin,
       }
     })
-    return newEntries
+    return result
   }, [supabase])
 
   useEffect(() => {
@@ -133,6 +131,13 @@ export default function ChatPage() {
       if (!profile?.is_plus) { setIsPlus(false); return }
       setIsPlus(true)
       setIsAdmin(profile?.is_admin || false)
+
+      // Load follows
+      const { data: follows } = await supabase
+        .from('follows')
+        .select('following_id')
+        .eq('follower_id', user.id)
+      setFollowedIds(new Set(follows?.map(f => f.following_id) || []))
 
       const { data: msgs } = await supabase
         .from('messages')
@@ -153,9 +158,7 @@ export default function ChatPage() {
 
       const channel = supabase
         .channel('fitness-chat')
-        .on('postgres_changes', {
-          event: 'INSERT', schema: 'public', table: 'messages',
-        }, (payload) => {
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
           const newMsg = payload.new as Message
           setMessages(prev => {
             if (prev.find(m => m.id === newMsg.id)) return prev
@@ -163,17 +166,13 @@ export default function ChatPage() {
           })
           setProfileCache(cache => {
             if (cache[newMsg.user_id]) {
-              setMessages(prev => prev.map(m =>
-                m.id === newMsg.id ? { ...m, ...cache[newMsg.user_id] } : m
-              ))
+              setMessages(prev => prev.map(m => m.id === newMsg.id ? { ...m, ...cache[newMsg.user_id] } : m))
               return cache
             }
             fetchProfiles([newMsg.user_id]).then(newCache => {
               const merged = { ...cache, ...newCache }
               setProfileCache(merged)
-              setMessages(prev => prev.map(m =>
-                m.id === newMsg.id ? { ...m, ...merged[m.user_id] } : m
-              ))
+              setMessages(prev => prev.map(m => m.id === newMsg.id ? { ...m, ...merged[m.user_id] } : m))
             })
             return cache
           })
@@ -191,12 +190,48 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length])
 
+  async function openProfile(msg: Message) {
+    if (!msg.username) return
+    const { data: goal } = await supabase
+      .from('goals')
+      .select('goal_weight')
+      .eq('user_id', msg.user_id)
+      .maybeSingle()
+    const { count } = await supabase
+      .from('follows')
+      .select('*', { count: 'exact', head: true })
+      .eq('following_id', msg.user_id)
+    setProfileModal({
+      user_id: msg.user_id,
+      display_name: msg.display_name || msg.username || 'Member',
+      username: msg.username,
+      start_weight: msg.start_weight || 0,
+      current_weight: msg.current_weight || msg.start_weight || 0,
+      goal_weight: goal?.goal_weight || null,
+      weight_unit: msg.weight_unit || 'lbs',
+      follower_count: count || 0,
+    })
+  }
+
+  async function toggleFollow(targetId: string) {
+    if (!userId || userId === targetId) return
+    setFollowLoading(true)
+    if (followedIds.has(targetId)) {
+      await supabase.from('follows').delete().eq('follower_id', userId).eq('following_id', targetId)
+      setFollowedIds(prev => { const s = new Set(prev); s.delete(targetId); return s })
+      if (profileModal) setProfileModal({ ...profileModal, follower_count: Math.max(0, profileModal.follower_count - 1) })
+    } else {
+      await supabase.from('follows').insert({ follower_id: userId, following_id: targetId })
+      setFollowedIds(prev => new Set([...prev, targetId]))
+      if (profileModal) setProfileModal({ ...profileModal, follower_count: profileModal.follower_count + 1 })
+    }
+    setFollowLoading(false)
+  }
+
   async function sendMessage(mediaUrl?: string, mediaType?: string) {
     const text = input.trim()
     if (!text && !mediaUrl) return
     if (sending) return
-
-    // Apply filter only for non-admin users
     if (!isAdmin && text && isBlocked(text)) {
       setBlockedNotice(true)
       setTimeout(() => setBlockedNotice(false), 3000)
@@ -204,128 +239,67 @@ export default function ChatPage() {
     }
 
     const tempId = `temp-${Date.now()}`
-    const optimistic: Message = {
-      id: tempId,
-      user_id: userId,
-      content: text,
-      media_url: mediaUrl || null,
-      media_type: mediaType || null,
-      created_at: new Date().toISOString(),
-      ...profileCache[userId],
-    }
+    const optimistic: Message = { id: tempId, user_id: userId, content: text, media_url: mediaUrl || null, media_type: mediaType || null, created_at: new Date().toISOString(), ...profileCache[userId] }
     setMessages(prev => [...prev, optimistic])
     setInput('')
     inputRef.current?.focus()
 
     setSending(true)
-    const { data, error } = await supabase.from('messages').insert({
-      user_id: userId,
-      content: text,
-      media_url: mediaUrl || null,
-      media_type: mediaType || null,
-    }).select().maybeSingle()
-
+    const { data, error } = await supabase.from('messages').insert({ user_id: userId, content: text, media_url: mediaUrl || null, media_type: mediaType || null }).select().maybeSingle()
     setSending(false)
 
     if (error) {
       setMessages(prev => prev.filter(m => m.id !== tempId))
       if (!mediaUrl) setInput(text)
     } else if (data) {
-      setMessages(prev => prev.map(m =>
-        m.id === tempId ? { ...data, ...profileCache[userId] } : m
-      ))
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...data, ...profileCache[userId] } : m))
     }
   }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-
-    const maxSize = 10 * 1024 * 1024 // 10MB
-    if (file.size > maxSize) {
-      alert('File too large. Max 10MB.')
-      return
-    }
-
+    if (file.size > 10 * 1024 * 1024) { alert('Max 10MB'); return }
     setUploading(true)
     const formData = new FormData()
     formData.append('file', file)
-
     const res = await fetch('/api/chat/upload', { method: 'POST', body: formData })
     const data = await res.json()
     setUploading(false)
-
     if (data.url) {
-      await sendMessage('', data.mediaType) // send with media
-      // Actually need to send with media URL
       const tempId = `temp-${Date.now()}`
-      const optimistic: Message = {
-        id: tempId,
-        user_id: userId,
-        content: '',
-        media_url: data.url,
-        media_type: data.mediaType,
-        created_at: new Date().toISOString(),
-        ...profileCache[userId],
-      }
+      const optimistic: Message = { id: tempId, user_id: userId, content: '', media_url: data.url, media_type: data.mediaType, created_at: new Date().toISOString(), ...profileCache[userId] }
       setMessages(prev => [...prev, optimistic])
-
-      const { data: msgData, error } = await supabase.from('messages').insert({
-        user_id: userId,
-        content: '',
-        media_url: data.url,
-        media_type: data.mediaType,
-      }).select().maybeSingle()
-
-      if (!error && msgData) {
-        setMessages(prev => prev.map(m =>
-          m.id === tempId ? { ...msgData, ...profileCache[userId] } : m
-        ))
-      }
+      const { data: msgData, error } = await supabase.from('messages').insert({ user_id: userId, content: '', media_url: data.url, media_type: data.mediaType }).select().maybeSingle()
+      if (!error && msgData) setMessages(prev => prev.map(m => m.id === tempId ? { ...msgData, ...profileCache[userId] } : m))
     }
-
-    // Reset file input
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  if (isPlus === false) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 text-center">
-        <div className="text-4xl mb-4">💬</div>
-        <h2 className="text-lg font-bold mb-2" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-          Fitness Chat
-        </h2>
-        <p className="text-sm mb-5" style={{ color: 'var(--text-secondary)', maxWidth: 280 }}>
-          Real conversations with real people on real journeys. Plus+ exclusive.
-        </p>
-        <button onClick={() => router.push('/plus')} className="btn-primary">
-          Upgrade to Plus+ →
-        </button>
-      </div>
-    )
-  }
+  if (isPlus === false) return (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 text-center">
+      <div className="text-4xl mb-4">💬</div>
+      <h2 className="text-lg font-bold mb-2" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Fitness Chat</h2>
+      <p className="text-sm mb-5" style={{ color: 'var(--text-secondary)', maxWidth: 280 }}>Real conversations with real people on real journeys. Plus+ exclusive.</p>
+      <button onClick={() => router.push('/plus')} className="btn-primary">Upgrade to Plus+ →</button>
+    </div>
+  )
 
-  if (isPlus === null) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="w-6 h-6 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
-      </div>
-    )
-  }
+  if (isPlus === null) return (
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="w-6 h-6 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+    </div>
+  )
 
   return (
     <div className="flex flex-col h-[calc(100vh-112px)] max-w-lg mx-auto w-full overflow-x-hidden">
       {/* Header */}
       <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
         <div>
-          <h1 className="text-base font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-            Fitness Chat
-          </h1>
+          <h1 className="text-base font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Fitness Chat</h1>
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Plus+ members · fitness topics only</p>
         </div>
-        <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: 'var(--accent)', color: '#0D1117' }}>
-          ✦ Live
-        </span>
+        <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: 'var(--accent)', color: '#0D1117' }}>✦ Live</span>
       </div>
 
       {/* Messages */}
@@ -340,51 +314,44 @@ export default function ChatPage() {
 
         {messages.map((msg, i) => {
           const isMe = msg.user_id === userId
+          const isFollowed = followedIds.has(msg.user_id)
           const showName = !isMe && (i === 0 || messages[i - 1].user_id !== msg.user_id)
-          const lostSoFar = msg.start_weight && msg.current_weight
-            ? parseFloat((msg.start_weight - msg.current_weight).toFixed(1))
-            : null
-          const msgIsAdmin = !!(profileCache[msg.user_id] as Record<string, unknown>)?.is_admin
+          const lostSoFar = msg.start_weight && msg.current_weight ? parseFloat((msg.start_weight - msg.current_weight).toFixed(1)) : null
 
           return (
             <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
               {showName && (
-                <div className="flex items-center gap-1.5 mb-1 ml-1 flex-wrap">
-                  <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+                <button
+                  className="flex items-center gap-1.5 mb-1 ml-1 flex-wrap"
+                  onClick={() => openProfile(msg)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                >
+                  <span className="text-xs font-semibold" style={{ color: isFollowed ? 'var(--accent)' : 'var(--text-primary)' }}>
                     {msg.display_name || msg.username || 'Member'}
+                    {isFollowed && <span className="ml-1">⭐</span>}
+                    {msg.is_admin && <span className="ml-1 text-xs px-1 rounded" style={{ background: 'var(--accent)', color: '#0D1117', fontSize: '9px' }}>ADMIN</span>}
                   </span>
                   {lostSoFar !== null && lostSoFar > 0 && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
                       −{lostSoFar} {msg.weight_unit || 'lbs'}
                     </span>
                   )}
-                </div>
+                </button>
               )}
 
-              {/* Media message */}
               {msg.media_url && (
                 <div className="max-w-[80%] mb-1">
-                  <img
-                    src={msg.media_url}
-                    alt="shared media"
-                    style={{
-                      maxWidth: '100%',
-                      maxHeight: '300px',
-                      borderRadius: 12,
-                      display: 'block',
-                    }}
-                  />
+                  <img src={msg.media_url} alt="shared media" style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: 12, display: 'block' }} />
                 </div>
               )}
 
-              {/* Text message */}
               {msg.content && (
                 <div
                   className="max-w-[80%] px-3 py-2 rounded-2xl text-sm"
                   style={{
-                    background: isMe ? 'var(--accent)' : 'var(--bg-card)',
+                    background: isMe ? 'var(--accent)' : isFollowed ? 'rgba(45,212,191,0.08)' : 'var(--bg-card)',
                     color: isMe ? '#0D1117' : 'var(--text-primary)',
-                    border: isMe ? 'none' : '1px solid var(--border)',
+                    border: isMe ? 'none' : isFollowed ? '1px solid rgba(45,212,191,0.3)' : '1px solid var(--border)',
                     borderBottomRightRadius: isMe ? 4 : undefined,
                     borderBottomLeftRadius: !isMe ? 4 : undefined,
                     opacity: msg.id.startsWith('temp-') ? 0.7 : 1,
@@ -392,31 +359,71 @@ export default function ChatPage() {
                     wordBreak: 'break-word',
                   }}
                 >
-                  <MessageContent
-                    content={msg.content}
-                    isAdmin={msgIsAdmin || isMe}
-                    isMe={isMe}
-                  />
+                  <MessageContent content={msg.content} isAdmin={!!(msg.is_admin || isMe)} isMe={isMe} />
                 </div>
               )}
-
-              <span className="text-xs mt-0.5 mx-1" style={{ color: 'var(--text-muted)' }}>
-                {formatTime(msg.created_at)}
-              </span>
+              <span className="text-xs mt-0.5 mx-1" style={{ color: 'var(--text-muted)' }}>{formatTime(msg.created_at)}</span>
             </div>
           )
         })}
         <div ref={bottomRef} />
       </div>
 
-      {/* Blocked notice */}
+      {/* Profile modal */}
+      {profileModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={() => setProfileModal(null)}>
+          <div className="card w-full max-w-sm p-5 animate-fade-in" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                  {profileModal.display_name}
+                </h3>
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  @{profileModal.username} · {profileModal.follower_count} follower{profileModal.follower_count !== 1 ? 's' : ''}
+                </p>
+              </div>
+              <button
+                onClick={() => toggleFollow(profileModal.user_id)}
+                disabled={followLoading || profileModal.user_id === userId}
+                className={followedIds.has(profileModal.user_id) ? 'btn-secondary py-2 px-3 text-sm gap-1.5' : 'btn-primary py-2 px-3 text-sm gap-1.5'}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill={followedIds.has(profileModal.user_id) ? 'var(--accent)' : 'currentColor'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                </svg>
+                {followedIds.has(profileModal.user_id) ? 'Following' : 'Follow'}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              <div className="stat-card text-center p-3">
+                <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{profileModal.current_weight}</div>
+                <div className="stat-label">{profileModal.weight_unit} now</div>
+              </div>
+              <div className="stat-card text-center p-3">
+                <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--success)' }}>
+                  {profileModal.start_weight - profileModal.current_weight > 0 ? `−${parseFloat((profileModal.start_weight - profileModal.current_weight).toFixed(1))}` : '0'}
+                </div>
+                <div className="stat-label">lost</div>
+              </div>
+              <div className="stat-card text-center p-3">
+                <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{profileModal.goal_weight || '—'}</div>
+                <div className="stat-label">goal</div>
+              </div>
+            </div>
+
+            <a href={`/u/${profileModal.username}`} target="_blank" rel="noopener noreferrer" className="btn-secondary w-full text-sm" style={{ display: 'flex', textDecoration: 'none' }}>
+              View full profile →
+            </a>
+          </div>
+        </div>
+      )}
+
       {blockedNotice && (
         <div className="mx-4 mb-2 px-3 py-2 rounded-xl text-xs text-center" style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--danger)' }}>
           Keep it in-app — links, socials, and contact info aren&apos;t allowed here.
         </div>
       )}
 
-      {/* Upload progress */}
       {uploading && (
         <div className="mx-4 mb-2 px-3 py-2 rounded-xl text-xs text-center" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
           Uploading…
@@ -426,31 +433,16 @@ export default function ChatPage() {
       {/* Input */}
       <div className="px-4 pb-4 pt-2 border-t" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
         <div className="flex items-center gap-2">
-          {/* Image upload — admin only */}
           {isAdmin && (
             <>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,.gif"
-                className="hidden"
-                onChange={handleFileUpload}
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                className="flex-shrink-0 p-2.5 rounded-xl"
-                style={{ background: 'var(--bg-input)', color: 'var(--text-muted)' }}
-                title="Upload image or GIF"
-              >
+              <input ref={fileInputRef} type="file" accept="image/*,.gif" className="hidden" onChange={handleFileUpload} />
+              <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="flex-shrink-0 p-2.5 rounded-xl" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)' }}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
-                  <polyline points="21 15 16 10 5 21"/>
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
                 </svg>
               </button>
             </>
           )}
-
           <input
             ref={inputRef}
             className="input-base flex-1"
@@ -460,22 +452,13 @@ export default function ChatPage() {
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
             maxLength={isAdmin ? 2000 : 500}
           />
-          <button
-            onClick={() => sendMessage()}
-            disabled={sending || (!input.trim())}
-            className="btn-primary py-3 px-4 flex-shrink-0"
-            style={{ borderRadius: 10 }}
-          >
+          <button onClick={() => sendMessage()} disabled={sending || !input.trim()} className="btn-primary py-3 px-4 flex-shrink-0" style={{ borderRadius: 10 }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
             </svg>
           </button>
         </div>
-        {!isAdmin && (
-          <p className="text-xs mt-1.5 text-center" style={{ color: 'var(--text-muted)' }}>
-            Fitness topics only · No links, socials, or self-promotion
-          </p>
-        )}
+        {!isAdmin && <p className="text-xs mt-1.5 text-center" style={{ color: 'var(--text-muted)' }}>Fitness topics only · No links, socials, or self-promotion</p>}
       </div>
     </div>
   )
