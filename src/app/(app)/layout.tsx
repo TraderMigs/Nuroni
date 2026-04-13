@@ -1,6 +1,7 @@
 'use client'
 
 import { usePathname, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useEffect, useState } from 'react'
 
@@ -110,29 +111,29 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         />
         <div className="flex items-center gap-1">
           {!isPlus && (
-            <button
-              onClick={() => router.push('/plus')}
+            <Link
+              href="/plus"
+              prefetch
               className="text-xs font-bold px-2.5 py-1 rounded-lg flex-shrink-0"
-              style={{ background: 'var(--accent)', color: '#0D1117' }}
+              style={{ background: 'var(--accent)', color: '#0D1117', textDecoration: 'none' }}
             >
               ✦ Plus+
-            </button>
+            </Link>
           )}
           {isAdmin && (
-            <button
-              onClick={() => router.push('/admin')}
+            <Link
+              href="/admin"
+              prefetch
               className="text-xs px-2 py-1 rounded-lg"
               style={{
                 color: pathname === '/admin' ? 'var(--accent)' : 'var(--text-muted)',
                 fontWeight: pathname === '/admin' ? 600 : 400,
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
+                textDecoration: 'none',
                 fontFamily: 'var(--font-body)',
               }}
             >
               Admin
-            </button>
+            </Link>
           )}
           <ThemeToggle />
           <button onClick={handleLogout} className="nav-item" aria-label="Sign out">
@@ -147,22 +148,27 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {children}
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-center sm:justify-center px-2 py-2 border-t" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-        {navItems.map(item => (
-          <button
-            key={item.href}
-            className={`nav-item relative ${pathname === item.href ? 'active' : ''}`}
-            onClick={() => router.push(item.href)}
-          >
-            {item.icon}
-            <span>{item.label}</span>
-            {item.plusOnly && !isPlus && (
-              <span className="absolute -top-1 -right-1 text-xs w-3.5 h-3.5 flex items-center justify-center rounded-full font-bold" style={{ background: 'var(--accent)', color: '#0D1117', fontSize: '7px' }}>
-                +
-              </span>
-            )}
-          </button>
-        ))}
+      {/* Bottom nav — Link prefetch for instant switching */}
+      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+        <div className="flex items-center justify-evenly mx-auto py-2" style={{ maxWidth: '480px' }}>
+          {navItems.map(item => (
+            <Link
+              key={item.href}
+              href={item.href}
+              prefetch
+              className={`nav-item relative ${pathname === item.href ? 'active' : ''}`}
+              style={{ textDecoration: 'none', minWidth: '60px' }}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+              {item.plusOnly && !isPlus && (
+                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 flex items-center justify-center rounded-full font-bold" style={{ background: 'var(--accent)', color: '#0D1117', fontSize: '7px' }}>
+                  +
+                </span>
+              )}
+            </Link>
+          ))}
+        </div>
       </nav>
     </div>
   )

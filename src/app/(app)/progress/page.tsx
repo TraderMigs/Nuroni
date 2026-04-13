@@ -185,11 +185,16 @@ export default function ProgressPage() {
 
   async function downloadShareCard() {
     if (!profile) return
+    setToast('Generating card…')
     const url = `/api/share-card?username=${profile.username}`
+    const res = await fetch(url)
+    const blob = await res.blob()
+    const objectUrl = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url
-    a.download = `nuroni-${profile.username}-progress.svg`
+    a.href = objectUrl
+    a.download = `nuroni-${profile.username}-progress.png`
     a.click()
+    URL.revokeObjectURL(objectUrl)
     setToast('Share card downloaded!')
     setShowShareCard(false)
   }
