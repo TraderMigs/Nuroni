@@ -57,7 +57,6 @@ function getMilestone(lostSoFar: number, unit: string, pctToGoal: number): strin
   return null
 }
 
-// Smoothed trend line (7-day rolling average)
 function smoothData(data: { date: string; weight: number }[]) {
   return data.map((d, i) => {
     const slice = data.slice(Math.max(0, i - 3), i + 4)
@@ -66,13 +65,12 @@ function smoothData(data: { date: string; weight: number }[]) {
   })
 }
 
-// Pace tracker: weeks to goal at current rate
 function getPace(entries: Entry[], goalWeight: number): string | null {
   if (entries.length < 7) return null
   const recent = entries.slice(0, 7)
   const oldest = recent[recent.length - 1].weight
   const newest = recent[0].weight
-  const weeklyLoss = (oldest - newest) / (7 / 7)
+  const weeklyLoss = (oldest - newest)
   if (weeklyLoss <= 0) return null
   const remaining = newest - goalWeight
   if (remaining <= 0) return 'You\'ve already hit your goal! 🎯'
@@ -88,11 +86,17 @@ function PlusGate({ onUpgrade }: { onUpgrade: () => void }) {
       <div className="text-2xl mb-2">✦</div>
       <p className="text-sm font-semibold mb-1" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-display)' }}>Plus+ feature</p>
       <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>Upgrade to unlock this and more for $5/month.</p>
-      <button onClick={onUpgrade} className="btn-primary text-sm py-2 px-4">
-        Upgrade to Plus+ →
-      </button>
+      <button onClick={onUpgrade} className="btn-primary text-sm py-2 px-4">Upgrade to Plus+ →</button>
     </div>
   )
+}
+
+// Days since last entry
+function daysSinceLastEntry(entries: Entry[]): number | null {
+  if (!entries.length) return null
+  const last = new Date(entries[0].created_at)
+  const now = new Date()
+  return Math.floor((now.getTime() - last.getTime()) / 86400000)
 }
 
 export default function ProgressPage() {
@@ -108,6 +112,8 @@ export default function ProgressPage() {
   const [showWeekly, setShowWeekly] = useState(false)
   const [noteInput, setNoteInput] = useState('')
   const [exportLoading, setExportLoading] = useState(false)
+  const [showShareCard, setShowShareCard] = useState(false)
+  const [nudgeDismissed, setNudgeDismissed] = useState(false)
 
   const [weightInput, setWeightInput] = useState('')
   const [stepsInput, setStepsInput] = useState('')
@@ -133,6 +139,13 @@ export default function ProgressPage() {
 
   useEffect(() => { load() }, [load])
 
+  // Push notification setup
+  useEffect(() => {
+    if ('serviceWorker' in navigator && 'Notification' in window) {
+      Notification.requestPermission()
+    }
+  }, [])
+
   async function logEntry() {
     if (!weightInput) return
     setSaving(true)
@@ -150,6 +163,7 @@ export default function ProgressPage() {
       setStepsInput('')
       setDistanceInput('')
       setNoteInput('')
+      setNudgeDismissed(true)
       await load()
     }
     setSaving(false)
@@ -167,6 +181,33 @@ export default function ProgressPage() {
     if (navigator.share) {
       await navigator.share({ title: `${profile.display_name}'s journey on Nuroni`, url })
     } else { copyLink() }
+  }
+
+  async function downloadShareCard() {
+    if (!profile) return
+    const url = `/api/share-card?username=${profile.username}`
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `nuroni-${profile.username}-progress.svg`
+    a.click()
+    setToast('Share card downloaded!')
+    setShowShareCard(false)
+  }
+
+  async function shareCard() {
+    if (!profile) return
+    const url = `/api/share-card?username=${profile.username}`
+    if (navigator.share) {
+      await navigator.share({
+        title: `${profile.display_name}'s Nuroni Progress`,
+        text: `Check out my weight loss journey on Nuroni! ${window.location.origin}/u/${profile.username}`,
+        url: `${window.location.origin}/u/${profile.username}`,
+      })
+    } else {
+      await navigator.clipboard.writeText(`${window.location.origin}/u/${profile.username}`)
+      setToast('Profile link copied!')
+    }
+    void url
   }
 
   function exportCSV() {
@@ -213,6 +254,8 @@ export default function ProgressPage() {
   const milestone = getMilestone(lostSoFar, unit, pctToGoal)
   const weekly = getWeeklySummary(entries, unit)
   const pace = isPlus ? getPace(entries, goal.goal_weight) : null
+  const daysSince = daysSinceLastEntry(entries)
+  const showNudge = !nudgeDismissed && daysSince !== null && daysSince >= 2
 
   const rawChartData = [...entries].reverse().slice(-14).map(e => ({
     date: new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
@@ -224,6 +267,21 @@ export default function ProgressPage() {
     <div className="w-full max-w-lg mx-auto px-4 py-5 space-y-5 overflow-x-hidden">
       {toast && <Toast msg={toast} onDone={() => setToast('')} />}
 
+      {/* Login nudge banner */}
+      {showNudge && (
+        <div className="card p-3.5 flex items-center justify-between gap-3 animate-fade-in" style={{ background: 'rgba(45,212,191,0.06)', borderColor: 'rgba(45,212,191,0.25)' }}>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="text-lg flex-shrink-0">📅</span>
+            <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
+              {daysSince === 2 ? "It's been 2 days — log your weight to keep your streak!" : `${daysSince} days since your last entry. Come back and log!`}
+            </p>
+          </div>
+          <button onClick={() => setNudgeDismissed(true)} style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="min-w-0">
@@ -232,9 +290,7 @@ export default function ProgressPage() {
               {profile.display_name}
             </h1>
             {isPlus && (
-              <span className="text-xs px-2 py-0.5 rounded-full font-bold flex-shrink-0" style={{ background: 'var(--accent)', color: '#0D1117' }}>
-                Plus+
-              </span>
+              <span className="text-xs px-2 py-0.5 rounded-full font-bold flex-shrink-0" style={{ background: 'var(--accent)', color: '#0D1117' }}>Plus+</span>
             )}
           </div>
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Your progress</p>
@@ -246,7 +302,7 @@ export default function ProgressPage() {
             </svg>
             Copy
           </button>
-          <button onClick={shareLink} className="btn-primary py-2 px-3 text-sm gap-1.5">
+          <button onClick={() => setShowShareCard(true)} className="btn-primary py-2 px-3 text-sm gap-1.5">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
               <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
@@ -255,6 +311,44 @@ export default function ProgressPage() {
           </button>
         </div>
       </div>
+
+      {/* Share card modal */}
+      {showShareCard && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }} onClick={() => setShowShareCard(false)}>
+          <div className="card p-5 w-full max-w-sm animate-fade-in" onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-bold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+              Share your progress
+            </h3>
+            <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>Choose how you want to share</p>
+
+            {/* Preview */}
+            <div className="rounded-xl overflow-hidden mb-4 border" style={{ borderColor: 'var(--border)' }}>
+              <img
+                src={`/api/share-card?username=${profile.username}`}
+                alt="Progress card preview"
+                style={{ width: '100%', height: 'auto', display: 'block' }}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <button onClick={downloadShareCard} className="btn-primary w-full gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Download card
+              </button>
+              <button onClick={shareLink} className="btn-secondary w-full gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+                </svg>
+                Share live link
+              </button>
+              <button onClick={() => setShowShareCard(false)} className="btn-secondary w-full">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Milestone banner */}
       {milestone && lostSoFar > 0 && (
@@ -272,7 +366,6 @@ export default function ProgressPage() {
             <div className="stat-label">Day streak</div>
           </div>
         </div>
-
         <button className="stat-card text-left" onClick={() => setShowWeekly(v => !v)} style={{ cursor: 'pointer' }}>
           <div className="flex items-center justify-between mb-1">
             <span className="stat-label">This week</span>
@@ -323,7 +416,7 @@ export default function ProgressPage() {
         </div>
       )}
 
-      {/* Pace tracker — Plus+ */}
+      {/* Pace tracker */}
       {isPlus && pace && (
         <div className="card p-3.5 flex items-center gap-3" style={{ background: 'var(--accent-subtle)', borderColor: 'rgba(45,212,191,0.2)' }}>
           <span className="text-lg">⏱️</span>
@@ -377,21 +470,18 @@ export default function ProgressPage() {
             <input className="input-base" type="number" step="0.01" placeholder="0.0" value={distanceInput} onChange={e => setDistanceInput(e.target.value)} />
           </div>
         </div>
-
-        {/* Note field — Plus+ only */}
         {isPlus && (
           <div className="mb-3">
             <label className="label">Note <span style={{ color: 'var(--text-muted)' }}>(optional)</span></label>
             <input className="input-base" placeholder="How are you feeling today?" value={noteInput} onChange={e => setNoteInput(e.target.value)} />
           </div>
         )}
-
         <button className="btn-primary w-full" onClick={logEntry} disabled={saving || !weightInput}>
           {saving ? 'Saving…' : 'Log entry'}
         </button>
       </div>
 
-      {/* Chart — Plus+ shows trend line */}
+      {/* Chart */}
       {chartData.length > 1 && (
         <div className="card p-4 overflow-hidden">
           <div className="flex items-center justify-between mb-3">
@@ -417,12 +507,8 @@ export default function ProgressPage() {
         </div>
       )}
 
-      {/* Plus+ upsell for pace if not plus */}
-      {!isPlus && entries.length >= 7 && (
-        <PlusGate onUpgrade={() => router.push('/plus')} />
-      )}
+      {!isPlus && entries.length >= 7 && <PlusGate onUpgrade={() => router.push('/plus')} />}
 
-      {/* Export CSV — Plus+ */}
       {isPlus && entries.length > 0 && (
         <button onClick={exportCSV} disabled={exportLoading} className="btn-secondary w-full text-sm gap-2">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -441,9 +527,7 @@ export default function ProgressPage() {
               <div key={entry.id} className="py-2 border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 min-w-0">
-                    {i === 0 && (
-                      <span className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>Latest</span>
-                    )}
+                    {i === 0 && <span className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>Latest</span>}
                     <span className="text-sm truncate" style={{ color: 'var(--text-secondary)' }}>
                       {new Date(entry.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </span>
@@ -453,9 +537,7 @@ export default function ProgressPage() {
                     {entry.steps > 0 && <span style={{ color: 'var(--text-muted)' }}>{entry.steps.toLocaleString()}</span>}
                   </div>
                 </div>
-                {entry.note && (
-                  <p className="text-xs mt-1 ml-0" style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>"{entry.note}"</p>
-                )}
+                {entry.note && <p className="text-xs mt-1" style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>"{entry.note}"</p>}
               </div>
             ))}
           </div>
@@ -468,15 +550,10 @@ export default function ProgressPage() {
         </div>
       )}
 
-      {/* Plus upsell at bottom for free users */}
       {!isPlus && (
         <button onClick={() => router.push('/plus')} className="w-full card p-4 text-center" style={{ border: '1px solid var(--accent)', cursor: 'pointer' }}>
-          <p className="text-sm font-semibold" style={{ color: 'var(--accent)', fontFamily: 'var(--font-display)' }}>
-            ✦ Upgrade to Plus+ — $5/month
-          </p>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-            Trend line · Pace tracker · Notes · Export · Community
-          </p>
+          <p className="text-sm font-semibold" style={{ color: 'var(--accent)', fontFamily: 'var(--font-display)' }}>✦ Upgrade to Plus+ — $5/month</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Trend line · Pace tracker · Notes · Export · Community</p>
         </button>
       )}
     </div>

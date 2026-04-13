@@ -147,7 +147,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {children}
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around px-2 py-2 border-t" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+      <nav className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-center sm:justify-center px-2 py-2 border-t" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
         {navItems.map(item => (
           <button
             key={item.href}

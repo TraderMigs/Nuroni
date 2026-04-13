@@ -235,6 +235,18 @@ select.input-base {
 .nav-item:hover { color: var(--text-secondary); background: var(--bg-input); }
 .nav-item.active { color: var(--accent); }
 
+/* Desktop nav — keep tabs compact */
+@media (min-width: 640px) {
+  nav.fixed {
+    display: flex;
+    justify-content: center;
+  }
+  nav.fixed > button {
+    min-width: 80px;
+    max-width: 100px;
+  }
+}
+
 /* Toast */
 .toast {
   position: fixed;
