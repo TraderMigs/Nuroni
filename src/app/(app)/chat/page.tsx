@@ -8,6 +8,8 @@ interface Message {
   id: string
   user_id: string
   content: string
+  media_url?: string | null
+  media_type?: string | null
   created_at: string
   display_name?: string
   username?: string
@@ -36,25 +38,63 @@ function formatTime(ts: string): string {
   return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
+// Render message content — makes URLs and emails clickable for admin messages
+function MessageContent({ content, isAdmin, isMe }: { content: string; isAdmin: boolean; isMe: boolean }) {
+  if (!isAdmin || !content) return <span>{content}</span>
+
+  // Parse URLs and emails into clickable links
+  const urlRegex = /(https?:\/\/[^\s]+|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|www\.[^\s]+)/g
+  const parts = content.split(urlRegex)
+
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (urlRegex.test(part)) {
+          urlRegex.lastIndex = 0
+          const href = part.startsWith('http') ? part : part.includes('@') ? `mailto:${part}` : `https://${part}`
+          return (
+            <a
+              key={i}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                color: isMe ? '#0D1117' : 'var(--accent)',
+                textDecoration: 'underline',
+                wordBreak: 'break-all',
+              }}
+            >
+              {part}
+            </a>
+          )
+        }
+        return <span key={i}>{part}</span>
+      })}
+    </>
+  )
+}
+
 export default function ChatPage() {
   const supabase = createClient()
   const router = useRouter()
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [blockedNotice, setBlockedNotice] = useState(false)
   const [isPlus, setIsPlus] = useState<boolean | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
   const [userId, setUserId] = useState('')
   const [profileCache, setProfileCache] = useState<Record<string, Partial<Message>>>({})
 
-  // Fetch profile data for a list of user IDs — non-blocking
   const fetchProfiles = useCallback(async (userIds: string[]) => {
     const { data: profiles } = await supabase
       .from('profiles')
-      .select('id, display_name, username, weight_unit, start_weight')
+      .select('id, display_name, username, weight_unit, start_weight, is_admin')
       .in('id', userIds)
 
     const { data: entries } = await supabase
@@ -88,12 +128,12 @@ export default function ChatPage() {
       setUserId(user.id)
 
       const { data: profile } = await supabase
-        .from('profiles').select('is_plus').eq('id', user.id).maybeSingle()
+        .from('profiles').select('is_plus, is_admin').eq('id', user.id).maybeSingle()
 
       if (!profile?.is_plus) { setIsPlus(false); return }
       setIsPlus(true)
+      setIsAdmin(profile?.is_admin || false)
 
-      // Load last 50 messages — show immediately with no profile data
       const { data: msgs } = await supabase
         .from('messages')
         .select('*')
@@ -103,7 +143,6 @@ export default function ChatPage() {
       const initialMsgs = msgs || []
       setMessages(initialMsgs)
 
-      // Fetch profiles in background — update messages when ready
       if (initialMsgs.length > 0) {
         const ids = Array.from(new Set(initialMsgs.map(m => m.user_id)))
         fetchProfiles(ids).then(cache => {
@@ -112,31 +151,23 @@ export default function ChatPage() {
         })
       }
 
-      // Realtime subscription
       const channel = supabase
         .channel('fitness-chat')
         .on('postgres_changes', {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
+          event: 'INSERT', schema: 'public', table: 'messages',
         }, (payload) => {
           const newMsg = payload.new as Message
-          // Show message INSTANTLY — enrich in background
           setMessages(prev => {
-            // Check if already in list (optimistic)
             if (prev.find(m => m.id === newMsg.id)) return prev
             return [...prev, newMsg]
           })
-          // Enrich with profile data in background
           setProfileCache(cache => {
             if (cache[newMsg.user_id]) {
-              // Already have profile — apply immediately
               setMessages(prev => prev.map(m =>
                 m.id === newMsg.id ? { ...m, ...cache[newMsg.user_id] } : m
               ))
               return cache
             }
-            // Fetch fresh
             fetchProfiles([newMsg.user_id]).then(newCache => {
               const merged = { ...cache, ...newCache }
               setProfileCache(merged)
@@ -156,27 +187,29 @@ export default function ChatPage() {
     return () => { cleanup?.() }
   }, [supabase, router, fetchProfiles])
 
-  // Auto-scroll on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length])
 
-  async function sendMessage() {
+  async function sendMessage(mediaUrl?: string, mediaType?: string) {
     const text = input.trim()
-    if (!text || sending) return
+    if (!text && !mediaUrl) return
+    if (sending) return
 
-    if (isBlocked(text)) {
+    // Apply filter only for non-admin users
+    if (!isAdmin && text && isBlocked(text)) {
       setBlockedNotice(true)
       setTimeout(() => setBlockedNotice(false), 3000)
       return
     }
 
-    // Optimistic — show message instantly before server confirms
     const tempId = `temp-${Date.now()}`
     const optimistic: Message = {
       id: tempId,
       user_id: userId,
       content: text,
+      media_url: mediaUrl || null,
+      media_type: mediaType || null,
       created_at: new Date().toISOString(),
       ...profileCache[userId],
     }
@@ -188,20 +221,71 @@ export default function ChatPage() {
     const { data, error } = await supabase.from('messages').insert({
       user_id: userId,
       content: text,
+      media_url: mediaUrl || null,
+      media_type: mediaType || null,
     }).select().maybeSingle()
 
     setSending(false)
 
     if (error) {
-      // Remove optimistic on error
       setMessages(prev => prev.filter(m => m.id !== tempId))
-      setInput(text)
+      if (!mediaUrl) setInput(text)
     } else if (data) {
-      // Replace temp with real
       setMessages(prev => prev.map(m =>
         m.id === tempId ? { ...data, ...profileCache[userId] } : m
       ))
     }
+  }
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const maxSize = 10 * 1024 * 1024 // 10MB
+    if (file.size > maxSize) {
+      alert('File too large. Max 10MB.')
+      return
+    }
+
+    setUploading(true)
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const res = await fetch('/api/chat/upload', { method: 'POST', body: formData })
+    const data = await res.json()
+    setUploading(false)
+
+    if (data.url) {
+      await sendMessage('', data.mediaType) // send with media
+      // Actually need to send with media URL
+      const tempId = `temp-${Date.now()}`
+      const optimistic: Message = {
+        id: tempId,
+        user_id: userId,
+        content: '',
+        media_url: data.url,
+        media_type: data.mediaType,
+        created_at: new Date().toISOString(),
+        ...profileCache[userId],
+      }
+      setMessages(prev => [...prev.filter(m => m.id !== tempId - 1), optimistic])
+
+      const { data: msgData, error } = await supabase.from('messages').insert({
+        user_id: userId,
+        content: '',
+        media_url: data.url,
+        media_type: data.mediaType,
+      }).select().maybeSingle()
+
+      if (!error && msgData) {
+        setMessages(prev => prev.map(m =>
+          m.id === tempId ? { ...msgData, ...profileCache[userId] } : m
+        ))
+      }
+    }
+
+    // Reset file input
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   if (isPlus === false) {
@@ -260,6 +344,7 @@ export default function ChatPage() {
           const lostSoFar = msg.start_weight && msg.current_weight
             ? parseFloat((msg.start_weight - msg.current_weight).toFixed(1))
             : null
+          const msgIsAdmin = !!(profileCache[msg.user_id] as Record<string, unknown>)?.is_admin
 
           return (
             <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
@@ -275,20 +360,46 @@ export default function ChatPage() {
                   )}
                 </div>
               )}
-              <div
-                className="max-w-[80%] px-3 py-2 rounded-2xl text-sm"
-                style={{
-                  background: isMe ? 'var(--accent)' : 'var(--bg-card)',
-                  color: isMe ? '#0D1117' : 'var(--text-primary)',
-                  border: isMe ? 'none' : '1px solid var(--border)',
-                  borderBottomRightRadius: isMe ? 4 : undefined,
-                  borderBottomLeftRadius: !isMe ? 4 : undefined,
-                  opacity: msg.id.startsWith('temp-') ? 0.7 : 1,
-                  transition: 'opacity 0.2s',
-                }}
-              >
-                {msg.content}
-              </div>
+
+              {/* Media message */}
+              {msg.media_url && (
+                <div className="max-w-[80%] mb-1">
+                  <img
+                    src={msg.media_url}
+                    alt="shared media"
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '300px',
+                      borderRadius: 12,
+                      display: 'block',
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Text message */}
+              {msg.content && (
+                <div
+                  className="max-w-[80%] px-3 py-2 rounded-2xl text-sm"
+                  style={{
+                    background: isMe ? 'var(--accent)' : 'var(--bg-card)',
+                    color: isMe ? '#0D1117' : 'var(--text-primary)',
+                    border: isMe ? 'none' : '1px solid var(--border)',
+                    borderBottomRightRadius: isMe ? 4 : undefined,
+                    borderBottomLeftRadius: !isMe ? 4 : undefined,
+                    opacity: msg.id.startsWith('temp-') ? 0.7 : 1,
+                    transition: 'opacity 0.2s',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  <MessageContent
+                    content={msg.content}
+                    isAdmin={msgIsAdmin || isMe}
+                    isMe={isMe}
+                  />
+                </div>
+              )}
+
               <span className="text-xs mt-0.5 mx-1" style={{ color: 'var(--text-muted)' }}>
                 {formatTime(msg.created_at)}
               </span>
@@ -305,21 +416,53 @@ export default function ChatPage() {
         </div>
       )}
 
+      {/* Upload progress */}
+      {uploading && (
+        <div className="mx-4 mb-2 px-3 py-2 rounded-xl text-xs text-center" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
+          Uploading…
+        </div>
+      )}
+
       {/* Input */}
       <div className="px-4 pb-4 pt-2 border-t" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
         <div className="flex items-center gap-2">
+          {/* Image upload — admin only */}
+          {isAdmin && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,.gif"
+                className="hidden"
+                onChange={handleFileUpload}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="flex-shrink-0 p-2.5 rounded-xl"
+                style={{ background: 'var(--bg-input)', color: 'var(--text-muted)' }}
+                title="Upload image or GIF"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+                  <polyline points="21 15 16 10 5 21"/>
+                </svg>
+              </button>
+            </>
+          )}
+
           <input
             ref={inputRef}
             className="input-base flex-1"
-            placeholder="Ask about workouts, meals, progress…"
+            placeholder={isAdmin ? 'Send anything…' : 'Ask about workouts, meals, progress…'}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-            maxLength={500}
+            maxLength={isAdmin ? 2000 : 500}
           />
           <button
-            onClick={sendMessage}
-            disabled={sending || !input.trim()}
+            onClick={() => sendMessage()}
+            disabled={sending || (!input.trim())}
             className="btn-primary py-3 px-4 flex-shrink-0"
             style={{ borderRadius: 10 }}
           >
@@ -328,9 +471,11 @@ export default function ChatPage() {
             </svg>
           </button>
         </div>
-        <p className="text-xs mt-1.5 text-center" style={{ color: 'var(--text-muted)' }}>
-          Fitness topics only · No links, socials, or self-promotion
-        </p>
+        {!isAdmin && (
+          <p className="text-xs mt-1.5 text-center" style={{ color: 'var(--text-muted)' }}>
+            Fitness topics only · No links, socials, or self-promotion
+          </p>
+        )}
       </div>
     </div>
   )
