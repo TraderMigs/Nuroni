@@ -1,6 +1,56 @@
 import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import type { Metadata } from 'next'
+
+export async function generateMetadata({ params }: { params: { username: string } }): Promise<Metadata> {
+  const supabase = await createClient()
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('display_name, username, start_weight, weight_unit, is_public')
+    .eq('username', params.username.toLowerCase())
+    .maybeSingle()
+
+  if (!profile || !profile.is_public) {
+    return { title: 'Nuroni' }
+  }
+
+  const { data: entries } = await supabase
+    .from('entries')
+    .select('weight')
+    .eq('user_id', (await supabase.from('profiles').select('id').eq('username', params.username).maybeSingle()).data?.id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  const currentWeight = entries?.[0]?.weight ?? profile.start_weight
+  const lostSoFar = parseFloat((profile.start_weight - currentWeight).toFixed(1))
+  const unit = profile.weight_unit
+
+  const title = `${profile.display_name}'s journey on Nuroni`
+  const description = lostSoFar > 0
+    ? `${profile.display_name} has lost ${lostSoFar} ${unit} so far. Follow their journey on Nuroni.`
+    : `${profile.display_name} just started their weight loss journey on Nuroni.`
+
+  const shareCardUrl = `https://nuroni.app/api/share-card?username=${profile.username}`
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      type: 'profile',
+      url: `https://nuroni.app/u/${profile.username}`,
+      images: [{ url: shareCardUrl, width: 1080, height: 1080, alt: title }],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [shareCardUrl],
+    },
+  }
+}
 
 export default async function PublicProfilePage({ params }: { params: { username: string } }) {
   const supabase = await createClient()
@@ -41,6 +91,12 @@ export default async function PublicProfilePage({ params }: { params: { username
     .order('created_at', { ascending: false })
     .limit(14)
 
+  // Follow count
+  const { count: followerCount } = await supabase
+    .from('follows')
+    .select('*', { count: 'exact', head: true })
+    .eq('following_id', profile.id)
+
   const currentWeight = entries && entries[0] ? entries[0].weight : profile.start_weight
   const unit = profile.weight_unit
   const lostSoFar = parseFloat((profile.start_weight - currentWeight).toFixed(1))
@@ -50,24 +106,30 @@ export default async function PublicProfilePage({ params }: { params: { username
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg)' }}>
-      {/* Thin top accent bar */}
       <div className="h-1 w-full" style={{ background: 'linear-gradient(90deg, var(--accent), var(--accent-hover))' }} />
 
-      <div className="w-full max-w-md mx-auto px-4 py-8 space-y-5 overflow-x-hidden">
+      <div className="max-w-md mx-auto px-4 py-8 space-y-5 overflow-x-hidden">
         {/* Branding */}
         <div className="flex items-center justify-between">
-          <img src="/logo.png" alt="Nuroni" style={{ height: '44px', width: 'auto', display: 'block' }} />
+          <img src="/logo.png" alt="Nuroni" style={{ height: '36px', width: 'auto' }} />
           <span className="text-xs px-2 py-1 rounded-full" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)', fontWeight: 500 }}>
             Public journey
           </span>
         </div>
 
         {/* Profile header */}
-        <div>
-          <h1 className="text-2xl font-bold mb-0.5" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-            {profile.display_name}
-          </h1>
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>@{profile.username} · on Nuroni</p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold mb-0.5" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+              {profile.display_name}
+            </h1>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              @{profile.username}
+              {followerCount ? ` · ${followerCount} follower${followerCount !== 1 ? 's' : ''}` : ''}
+            </p>
+          </div>
+          {/* Follow button — client component */}
+          <FollowButton profileId={profile.id} />
         </div>
 
         {/* Progress bar */}
@@ -88,34 +150,21 @@ export default async function PublicProfilePage({ params }: { params: { username
 
         {/* Stats */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="stat-card">
-            <div className="stat-value">{currentWeight}</div>
-            <div className="stat-label">Current {unit}</div>
-          </div>
+          <div className="stat-card"><div className="stat-value">{currentWeight}</div><div className="stat-label">Current {unit}</div></div>
           <div className="stat-card">
             <div className="stat-value" style={{ color: lostSoFar > 0 ? 'var(--success)' : 'var(--text-primary)' }}>
               {lostSoFar > 0 ? `−${lostSoFar}` : '0'}
             </div>
             <div className="stat-label">Lost ({unit})</div>
           </div>
-          {goal && (
-            <div className="stat-card">
-              <div className="stat-value">{goal.goal_weight}</div>
-              <div className="stat-label">Goal ({unit})</div>
-            </div>
-          )}
-          <div className="stat-card">
-            <div className="stat-value">{latestSteps.toLocaleString()}</div>
-            <div className="stat-label">Latest steps</div>
-          </div>
+          {goal && <div className="stat-card"><div className="stat-value">{goal.goal_weight}</div><div className="stat-label">Goal ({unit})</div></div>}
+          <div className="stat-card"><div className="stat-value">{latestSteps.toLocaleString()}</div><div className="stat-label">Latest steps</div></div>
         </div>
 
         {/* Recent entries */}
         {entries && entries.length > 0 && (
           <div className="card p-4">
-            <h2 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-              Recent entries
-            </h2>
+            <h2 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Recent entries</h2>
             <div className="space-y-2">
               {entries.slice(0, 7).map((entry, i) => (
                 <div key={i} className="flex items-center justify-between py-1.5 border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
@@ -134,18 +183,11 @@ export default async function PublicProfilePage({ params }: { params: { username
 
         {/* CTA */}
         <div className="card p-5 text-center">
-          <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
-            Ready to track your own journey?
-          </p>
-          <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
-            Simple. Shareable. Free to start.
-          </p>
-          <Link href="/signup" className="btn-primary w-full" style={{ display: 'flex' }}>
-            Start your journey →
-          </Link>
+          <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>Ready to track your own journey?</p>
+          <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>Simple. Shareable. Free to start.</p>
+          <Link href="/signup" className="btn-primary w-full" style={{ display: 'flex' }}>Start your journey →</Link>
         </div>
 
-        {/* Footer */}
         <p className="text-center text-xs pb-4" style={{ color: 'var(--text-muted)' }}>
           Powered by <Link href="/" style={{ color: 'var(--accent-text)' }}>Nuroni</Link> · Track less. Show real progress.
         </p>
@@ -153,3 +195,6 @@ export default async function PublicProfilePage({ params }: { params: { username
     </div>
   )
 }
+
+// Client component for follow button
+import FollowButton from './FollowButton'
