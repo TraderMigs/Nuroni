@@ -137,7 +137,7 @@ export default function ChatPage() {
         .from('follows')
         .select('following_id')
         .eq('follower_id', user.id)
-      setFollowedIds(new Set(follows?.map(f => f.following_id) || []))
+      setFollowedIds(new Set(Array.from(follows?.map(f => f.following_id) || [])))
 
       const { data: msgs } = await supabase
         .from('messages')
@@ -222,7 +222,7 @@ export default function ChatPage() {
       if (profileModal) setProfileModal({ ...profileModal, follower_count: Math.max(0, profileModal.follower_count - 1) })
     } else {
       await supabase.from('follows').insert({ follower_id: userId, following_id: targetId })
-      setFollowedIds(prev => new Set([...prev, targetId]))
+      setFollowedIds(prev => new Set(Array.from(prev).concat(targetId)))
       if (profileModal) setProfileModal({ ...profileModal, follower_count: profileModal.follower_count + 1 })
     }
     setFollowLoading(false)
