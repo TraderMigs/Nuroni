@@ -268,7 +268,7 @@ export default function ChatPage() {
         created_at: new Date().toISOString(),
         ...profileCache[userId],
       }
-      setMessages(prev => [...prev.filter(m => m.id !== tempId - 1), optimistic])
+      setMessages(prev => [...prev, optimistic])
 
       const { data: msgData, error } = await supabase.from('messages').insert({
         user_id: userId,
