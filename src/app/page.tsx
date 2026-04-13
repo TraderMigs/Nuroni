@@ -11,7 +11,7 @@ export default function LandingPage() {
 
       {/* Nav */}
       <nav className="landing-nav">
-        <Image src="/logo.png" alt="Nuroni" width={120} height={80} style={{ objectFit: 'contain', height: '38px', width: 'auto' }} priority />
+        <Image src="/logo.png" alt="Nuroni" width={180} height={60} style={{ objectFit: 'contain', height: '48px', width: 'auto' }} priority />
         <div className="landing-nav-links">
           <Link href="/login" className="landing-nav-link">Sign in</Link>
           <Link href="/signup" className="landing-cta-sm">Start free</Link>
@@ -115,7 +115,7 @@ export default function LandingPage() {
 
       {/* Footer */}
       <footer className="landing-footer">
-        <Image src="/logo.png" alt="Nuroni" width={80} height={54} style={{ objectFit: 'contain', height: '24px', width: 'auto', opacity: 0.5 }} />
+        <Image src="/logo.png" alt="Nuroni" width={120} height={40} style={{ objectFit: 'contain', height: '32px', width: 'auto', opacity: 0.5 }} />
         <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
           © {new Date().getFullYear()} Nuroni · Track less. Show real progress.
         </p>

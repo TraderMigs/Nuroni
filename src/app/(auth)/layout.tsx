@@ -8,11 +8,11 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <Image
             src="/logo.png"
             alt="Nuroni"
-            width={180}
-            height={120}
+            width={220}
+            height={73}
             className="mx-auto"
             priority
-            style={{ objectFit: 'contain' }}
+            style={{ objectFit: 'contain', width: '220px', height: 'auto' }}
           />
         </div>
         {children}

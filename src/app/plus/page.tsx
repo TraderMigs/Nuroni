@@ -56,7 +56,7 @@ export default function PlusPage() {
       <div className="relative z-10 max-w-md mx-auto px-4 py-8 space-y-6">
         {/* Header */}
         <div className="text-center">
-          <Image src="/logo.png" alt="Nuroni" width={120} height={80} style={{ objectFit: 'contain', height: '36px', width: 'auto', margin: '0 auto 1rem' }} />
+          <Image src="/logo.png" alt="Nuroni" width={120} height={80} style={{ objectFit: 'contain', height: '48px', width: 'auto' }} />
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-semibold mb-3" style={{ background: 'var(--accent)', color: '#0D1117' }}>
             ✦ Plus+
           </div>

@@ -42,12 +42,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const supabase = createClient()
   const [isPlus, setIsPlus] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return
-      supabase.from('profiles').select('is_plus').eq('id', user.id).maybeSingle()
-        .then(({ data }) => { if (data?.is_plus) setIsPlus(true) })
+      supabase.from('profiles').select('is_plus, is_admin').eq('id', user.id).maybeSingle()
+        .then(({ data }) => {
+          if (data?.is_plus) setIsPlus(true)
+          if (data?.is_admin) setIsAdmin(true)
+        })
     })
   }, [supabase])
 
@@ -79,12 +83,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     {
       href: '/chat',
       label: 'Chat',
+      plusOnly: true,
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
         </svg>
       ),
-      plusOnly: true,
     },
     {
       href: '/profile',
@@ -103,9 +107,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <Image
           src="/logo.png"
           alt="Nuroni"
-          width={100}
-          height={40}
-          style={{ objectFit: 'contain', height: '36px', width: 'auto' }}
+          width={160}
+          height={53}
+          style={{ objectFit: 'contain', height: '44px', width: 'auto', maxWidth: '160px' }}
           priority
         />
         <div className="flex items-center gap-1">
@@ -116,6 +120,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               style={{ background: 'var(--accent)', color: '#0D1117' }}
             >
               ✦ Plus+
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              onClick={() => router.push('/admin')}
+              className="text-xs px-2 py-1 rounded-lg"
+              style={{
+                color: pathname === '/admin' ? 'var(--accent)' : 'var(--text-muted)',
+                fontWeight: pathname === '/admin' ? 600 : 400,
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-body)',
+              }}
+            >
+              Admin
             </button>
           )}
           <ThemeToggle />

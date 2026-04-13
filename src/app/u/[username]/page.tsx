@@ -57,7 +57,7 @@ export default async function PublicProfilePage({ params }: { params: { username
       <div className="w-full max-w-md mx-auto px-4 py-8 space-y-5 overflow-x-hidden">
         {/* Branding */}
         <div className="flex items-center justify-between">
-          <Image src="/logo.png" alt="Nuroni" width={110} height={73} style={{ objectFit: 'contain', height: '32px', width: 'auto' }} />
+          <Image src="/logo.png" alt="Nuroni" width={160} height={53} style={{ objectFit: 'contain', height: '44px', width: 'auto' }} />
           <span className="text-xs px-2 py-1 rounded-full" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)', fontWeight: 500 }}>
             Public journey
           </span>
