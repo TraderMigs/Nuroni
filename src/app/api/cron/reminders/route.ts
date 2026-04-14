@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const webpush = require('web-push')
 
 webpush.setVapidDetails(
@@ -10,62 +10,46 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY!
 )
 
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+)
+
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get('authorization')
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const admin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } }
-  )
-
   const now = new Date()
-  const utcHour = now.getUTCHours()
-  const utcMinute = now.getUTCMinutes()
+  const currentTime = now.toTimeString().slice(0, 5)
 
-  const { data: profiles } = await admin
+  const { data: users, error } = await supabase
     .from('profiles')
-    .select('id, display_name, reminder_enabled, reminder_time')
+    .select('id, reminder_time, push_subscriptions(subscription)')
     .eq('reminder_enabled', true)
+    .eq('reminder_time', currentTime)
 
-  if (!profiles || profiles.length === 0) return NextResponse.json({ sent: 0 })
-
-  const { data: subs } = await admin
-    .from('push_subscriptions')
-    .select('user_id, subscription')
-    .in('user_id', profiles.map(p => p.id))
-
-  if (!subs || subs.length === 0) return NextResponse.json({ sent: 0 })
-
-  const subMap: Record<string, unknown> = {}
-  subs.forEach(s => { subMap[s.user_id] = s.subscription })
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
 
   let sent = 0
 
-  for (const profile of profiles) {
-    if (!profile.reminder_time || !subMap[profile.id]) continue
-
-    const [rHour, rMinute] = profile.reminder_time.split(':').map(Number)
-    const reminderMinutes = rHour * 60 + rMinute
-    const currentMinutes = utcHour * 60 + utcMinute
-    const diff = Math.abs(reminderMinutes - currentMinutes)
-    if (diff > 5 && diff < 1435) continue
-
-    try {
-      await webpush.sendNotification(
-        subMap[profile.id],
-        JSON.stringify({
-          title: 'Nuroni — Daily check-in 🏃',
-          body: `Hey ${profile.display_name || 'there'}! Time to log your steps and weight.`,
-          url: '/progress',
-        })
-      )
-      sent++
-    } catch {
-      await admin.from('push_subscriptions').delete().eq('user_id', profile.id)
+  for (const user of users ?? []) {
+    for (const sub of user.push_subscriptions ?? []) {
+      try {
+        await webpush.sendNotification(
+          sub.subscription,
+          JSON.stringify({
+            title: 'Nuroni Reminder 💪',
+            body: 'Time to log your weight!',
+          })
+        )
+        sent++
+      } catch {
+        // subscription may be expired, skip
+      }
     }
   }
 
