@@ -9,7 +9,14 @@ import {
 
 interface Profile { display_name: string; username: string; weight_unit: string; distance_unit: string; start_weight: number; is_public: boolean; is_plus: boolean }
 interface Goal { goal_weight: number; daily_step_goal: number; target_date: string | null }
-interface Entry { id: string; weight: number; steps: number; distance: number | null; note: string | null; created_at: string }
+interface Entry { id: string; weight: number; steps: number; distance: number | null; note: string | null; activities: string[] | null; created_at: string }
+
+const ACTIVITY_OPTIONS = [
+  'Walking', 'Jogging', 'Running', 'Cycling', 'Swimming',
+  'Weight Training', 'Calisthenics', 'HIIT', 'Yoga', 'Pilates',
+  'Jump Rope', 'Aerobics', 'Stretching', 'Boxing', 'Hiking',
+  'Sports', 'Dance', 'Martial Arts', 'Other',
+]
 
 function Toast({ msg, onDone }: { msg: string; onDone: () => void }) {
   useEffect(() => { const t = setTimeout(onDone, 2500); return () => clearTimeout(t) }, [onDone])
@@ -111,6 +118,7 @@ export default function ProgressPage() {
   const [toast, setToast] = useState('')
   const [showWeekly, setShowWeekly] = useState(false)
   const [noteInput, setNoteInput] = useState('')
+  const [activitiesInput, setActivitiesInput] = useState<string[]>([])
   const [exportLoading, setExportLoading] = useState(false)
   const [showShareCard, setShowShareCard] = useState(false)
   const [nudgeDismissed, setNudgeDismissed] = useState(false)
@@ -157,12 +165,14 @@ export default function ProgressPage() {
       steps: stepsInput ? parseInt(stepsInput) : 0,
       distance: distanceInput ? parseFloat(distanceInput) : null,
       note: noteInput || null,
+      activities: activitiesInput.length > 0 ? activitiesInput : null,
     })
     if (!error) {
       setToast('Entry logged ✓')
       setStepsInput('')
       setDistanceInput('')
       setNoteInput('')
+      setActivitiesInput([])
       setNudgeDismissed(true)
       await load()
     }
@@ -481,6 +491,32 @@ export default function ProgressPage() {
             <input className="input-base" placeholder="How are you feeling today?" value={noteInput} onChange={e => setNoteInput(e.target.value)} />
           </div>
         )}
+        {/* Activity pills */}
+        <div className="mb-3">
+          <label className="label">Activities today <span style={{ color: 'var(--text-muted)' }}>(optional)</span></label>
+          <div className="flex flex-wrap gap-1.5 mt-1">
+            {ACTIVITY_OPTIONS.map(a => {
+              const active = activitiesInput.includes(a)
+              return (
+                <button
+                  key={a}
+                  type="button"
+                  onClick={() => setActivitiesInput(prev =>
+                    active ? prev.filter(x => x !== a) : [...prev, a]
+                  )}
+                  className="px-2.5 py-1 rounded-full text-xs font-medium transition-all"
+                  style={{
+                    background: active ? 'var(--accent)' : 'var(--bg-input)',
+                    color: active ? '#0D1117' : 'var(--text-secondary)',
+                    border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                  }}
+                >
+                  {a}
+                </button>
+              )
+            })}
+          </div>
+        </div>
         <button className="btn-primary w-full" onClick={logEntry} disabled={saving || !weightInput}>
           {saving ? 'Saving…' : 'Log entry'}
         </button>
@@ -542,7 +578,7 @@ export default function ProgressPage() {
                     {entry.steps > 0 && <span style={{ color: 'var(--text-muted)' }}>{entry.steps.toLocaleString()}</span>}
                   </div>
                 </div>
-                {entry.note && <p className="text-xs mt-1" style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>"{entry.note}"</p>}
+                {entry.note && <p className="text-xs mt-1" style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>&ldquo;{entry.note}&rdquo;</p>}
               </div>
             ))}
           </div>
