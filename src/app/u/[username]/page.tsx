@@ -57,7 +57,7 @@ export default async function PublicProfilePage({ params }: { params: { username
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id, display_name, username, start_weight, weight_unit, is_public')
+    .select('id, display_name, username, start_weight, weight_unit, diet_type, diet_custom, is_public')
     .eq('username', params.username.toLowerCase())
     .maybeSingle()
 
