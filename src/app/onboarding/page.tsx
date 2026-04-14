@@ -4,12 +4,18 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
+const DIET_OPTIONS = [
+  'Standard', 'Vegetarian', 'Vegan', 'Pescatarian',
+  'Keto', 'Ketovore', 'Carnivore', 'Mediterranean',
+  'Paleo', 'Intermittent Fasting', 'Gluten-Free', 'Dairy-Free', 'Other',
+]
+
 export default function OnboardingPage() {
-  const [step, setStep] = useState(1)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const router = useRouter()
   const supabase = createClient()
+  const router = useRouter()
+  const [step, setStep] = useState(1)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   const [form, setForm] = useState({
     display_name: '',
@@ -20,295 +26,209 @@ export default function OnboardingPage() {
     start_weight: '',
     goal_weight: '',
     daily_step_goal: '8000',
-    target_date: '',
+    is_public: true,
+    diet_type: '',
+    diet_custom: '',
   })
 
-  function update(field: string, value: string) {
-    setForm(f => ({ ...f, [field]: value }))
+  function set(k: string, v: string | boolean) {
+    setForm(f => ({ ...f, [k]: v }))
   }
 
-  async function handleSubmit() {
-    setLoading(true)
+  async function save() {
+    setSaving(true)
     setError('')
-
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/login'); return }
 
-    const { data: existing } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('username', form.username.toLowerCase())
-      .maybeSingle()
+    const username = form.username.toLowerCase().replace(/[^a-z0-9_]/g, '')
+    if (!username) { setError('Username is required'); setSaving(false); return }
 
-    if (existing) {
-      setError('That username is already taken. Please choose another.')
-      setLoading(false)
-      return
-    }
-
-    const { error: profileError } = await supabase.from('profiles').upsert({
+    const { error: pErr } = await supabase.from('profiles').upsert({
       id: user.id,
       email: user.email,
-      display_name: form.display_name,
-      username: form.username.toLowerCase(),
+      display_name: form.display_name || 'Friend',
+      username,
       height: form.height ? parseFloat(form.height) : null,
       weight_unit: form.weight_unit,
       distance_unit: form.distance_unit,
       start_weight: parseFloat(form.start_weight),
-      is_public: true,
+      is_public: form.is_public,
+      diet_type: form.diet_type || null,
+      diet_custom: form.diet_type === 'Other' ? form.diet_custom : null,
     })
 
-    if (profileError) { setError(profileError.message); setLoading(false); return }
+    if (pErr) { setError(pErr.message); setSaving(false); return }
 
-    const { error: goalError } = await supabase.from('goals').upsert({
+    await supabase.from('goals').upsert({
       user_id: user.id,
       goal_weight: parseFloat(form.goal_weight),
       daily_step_goal: parseInt(form.daily_step_goal),
-      target_date: form.target_date || null,
-    })
-
-    if (goalError) { setError(goalError.message); setLoading(false); return }
-
-    await supabase.from('entries').insert({
-      user_id: user.id,
-      weight: parseFloat(form.start_weight),
-      steps: 0,
     })
 
     router.push('/progress')
-    router.refresh()
   }
 
-  return (
-    <div
-      className="min-h-screen flex flex-col items-center justify-center p-4 overflow-x-hidden"
-      style={{ background: 'var(--bg)' }}
-    >
-      <div className="w-full max-w-sm">
-        {/* Logo */}
-        <div className="text-center mb-6">
-          <img src="/logo.png" alt="Nuroni" style={{ height: '44px', width: 'auto', display: 'block', margin: '0 auto' }} />
-        </div>
+  const unit = form.weight_unit
 
-        {/* Step indicators */}
-        <div className="flex items-center gap-2 mb-6">
-          {[1, 2, 3].map(s => (
-            <div
-              key={s}
-              className="flex-1 h-1 rounded-full transition-all duration-300"
-              style={{ background: s <= step ? 'var(--accent)' : 'var(--border)' }}
-            />
-          ))}
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 overflow-x-hidden" style={{ background: 'var(--bg)' }}>
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-6">
+          <img src="/logo.png" alt="Nuroni" style={{ height: '40px', width: 'auto', display: 'block', margin: '0 auto 1rem' }} />
+          <div className="flex items-center justify-center gap-2 mb-2">
+            {[1, 2, 3, 4].map(i => (
+              <div key={i} className="h-1.5 rounded-full transition-all" style={{ width: step === i ? '24px' : '8px', background: step >= i ? 'var(--accent)' : 'var(--border)' }} />
+            ))}
+          </div>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Step {step} of 4</p>
         </div>
 
         <div className="card p-6 animate-fade-in">
 
-          {/* STEP 1 */}
+          {/* Step 1 — Profile */}
           {step === 1 && (
             <div className="space-y-4">
+              <h2 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                Let's set up your profile
+              </h2>
               <div>
-                <h2 className="text-lg font-semibold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-                  Let&apos;s set you up
-                </h2>
-                <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                  Quick setup — under a minute.
-                </p>
+                <label className="label">Display name</label>
+                <input className="input-base" placeholder="What should we call you?" value={form.display_name} onChange={e => set('display_name', e.target.value)} />
               </div>
-
               <div>
-                <label className="label">Your name</label>
-                <input
-                  className="input-base"
-                  placeholder="e.g. Alex"
-                  value={form.display_name}
-                  onChange={e => update('display_name', e.target.value)}
-                />
+                <label className="label">Username</label>
+                <input className="input-base" placeholder="yourname (no spaces)" value={form.username} onChange={e => set('username', e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} />
               </div>
-
               <div>
-                <label className="label">
-                  Username <span style={{ color: 'var(--text-muted)' }}>(for your public link)</span>
-                </label>
-                {/* Fixed prefix + input — no overlap */}
-                <div
-                  className="flex items-center input-base p-0 overflow-hidden"
-                  style={{ padding: 0 }}
-                >
-                  <span
-                    className="pl-3 pr-1 text-sm flex-shrink-0 select-none"
-                    style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)', whiteSpace: 'nowrap' }}
-                  >
-                    /u/
-                  </span>
-                  <input
-                    className="flex-1 bg-transparent outline-none text-sm py-3 pr-3"
-                    style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}
-                    placeholder="tradermigs"
-                    value={form.username}
-                    onChange={e => update('username', e.target.value.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase())}
-                  />
+                <label className="label">Units</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Weight</label>
+                    <div className="flex gap-2">
+                      {['lbs', 'kg'].map(u => (
+                        <button key={u} onClick={() => set('weight_unit', u)} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${form.weight_unit === u ? 'btn-primary' : 'btn-secondary'}`}>{u}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Distance</label>
+                    <div className="flex gap-2">
+                      {['miles', 'km'].map(u => (
+                        <button key={u} onClick={() => set('distance_unit', u)} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${form.distance_unit === u ? 'btn-primary' : 'btn-secondary'}`}>{u}</button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-                {form.username && (
-                  <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-                    nuroni.app/u/{form.username}
-                  </p>
-                )}
               </div>
-
-              <div className="grid grid-cols-2 gap-3">
+              <div className="flex items-center gap-3">
+                <button onClick={() => set('is_public', !form.is_public)} className="flex-shrink-0">
+                  <div className={`w-10 h-6 rounded-full transition-colors relative ${form.is_public ? '' : ''}`} style={{ background: form.is_public ? 'var(--accent)' : 'var(--border)' }}>
+                    <div className="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform" style={{ left: form.is_public ? '20px' : '4px' }} />
+                  </div>
+                </button>
                 <div>
-                  <label className="label">Weight unit</label>
-                  <select
-                    className="input-base"
-                    value={form.weight_unit}
-                    onChange={e => update('weight_unit', e.target.value)}
-                  >
-                    <option value="lbs">lbs</option>
-                    <option value="kg">kg</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Distance unit</label>
-                  <select
-                    className="input-base"
-                    value={form.distance_unit}
-                    onChange={e => update('distance_unit', e.target.value)}
-                  >
-                    <option value="miles">miles</option>
-                    <option value="km">km</option>
-                  </select>
+                  <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Public profile</p>
+                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Let others find and follow your journey</p>
                 </div>
               </div>
-
-              <button
-                className="btn-primary w-full"
-                onClick={() => setStep(2)}
-                disabled={!form.display_name || !form.username}
-              >
-                Continue →
-              </button>
+              <button className="btn-primary w-full" onClick={() => { if (!form.username) { setError('Username required'); return } setError(''); setStep(2) }} disabled={!form.display_name}>Next →</button>
+              {error && <p className="text-xs text-center" style={{ color: 'var(--danger)' }}>{error}</p>}
             </div>
           )}
 
-          {/* STEP 2 */}
+          {/* Step 2 — Weight & Goals */}
           {step === 2 && (
             <div className="space-y-4">
+              <h2 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                Your weight journey
+              </h2>
               <div>
-                <h2 className="text-lg font-semibold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-                  Your starting point
-                </h2>
-                <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                  Where are you right now?
-                </p>
+                <label className="label">Current weight ({unit})</label>
+                <input className="input-base" type="number" step="0.1" placeholder="0.0" value={form.start_weight} onChange={e => set('start_weight', e.target.value)} />
               </div>
-
               <div>
-                <label className="label">Starting weight ({form.weight_unit})</label>
-                <input
-                  className="input-base"
-                  type="number"
-                  step="0.1"
-                  placeholder={form.weight_unit === 'lbs' ? '185' : '84'}
-                  value={form.start_weight}
-                  onChange={e => update('start_weight', e.target.value)}
-                />
+                <label className="label">Goal weight ({unit})</label>
+                <input className="input-base" type="number" step="0.1" placeholder="0.0" value={form.goal_weight} onChange={e => set('goal_weight', e.target.value)} />
               </div>
-
               <div>
-                <label className="label">
-                  Height{' '}
-                  <span style={{ color: 'var(--text-muted)' }}>
-                    (optional, in {form.weight_unit === 'lbs' ? 'inches' : 'cm'})
-                  </span>
-                </label>
-                <input
-                  className="input-base"
-                  type="number"
-                  step="0.1"
-                  placeholder={form.weight_unit === 'lbs' ? '68' : '173'}
-                  value={form.height}
-                  onChange={e => update('height', e.target.value)}
-                />
+                <label className="label">Daily step goal</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {['5000', '8000', '10000', '12000', '15000', '20000'].map(s => (
+                    <button key={s} onClick={() => set('daily_step_goal', s)} className={`py-2 rounded-lg text-sm font-medium ${form.daily_step_goal === s ? 'btn-primary' : 'btn-secondary'}`}>
+                      {parseInt(s).toLocaleString()}
+                    </button>
+                  ))}
+                </div>
               </div>
-
-              <div className="flex gap-3">
+              <div className="flex gap-2">
                 <button className="btn-secondary flex-1" onClick={() => setStep(1)}>← Back</button>
-                <button
-                  className="btn-primary flex-1"
-                  onClick={() => setStep(3)}
-                  disabled={!form.start_weight}
-                >
-                  Continue →
-                </button>
+                <button className="btn-primary flex-1" onClick={() => { if (!form.start_weight || !form.goal_weight) { setError('Enter both weights'); return } setError(''); setStep(3) }}>Next →</button>
               </div>
+              {error && <p className="text-xs text-center" style={{ color: 'var(--danger)' }}>{error}</p>}
             </div>
           )}
 
-          {/* STEP 3 */}
+          {/* Step 3 — Diet type */}
           {step === 3 && (
             <div className="space-y-4">
               <div>
-                <h2 className="text-lg font-semibold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-                  Set your targets
+                <h2 className="text-lg font-bold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                  How do you eat?
                 </h2>
-                <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                  What are you working toward?
-                </p>
+                <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Optional — helps coaches understand your approach.</p>
               </div>
-
-              <div>
-                <label className="label">Goal weight ({form.weight_unit})</label>
-                <input
-                  className="input-base"
-                  type="number"
-                  step="0.1"
-                  placeholder={form.weight_unit === 'lbs' ? '160' : '72'}
-                  value={form.goal_weight}
-                  onChange={e => update('goal_weight', e.target.value)}
-                />
+              <div className="flex flex-wrap gap-2">
+                {DIET_OPTIONS.map(d => (
+                  <button
+                    key={d}
+                    onClick={() => set('diet_type', form.diet_type === d ? '' : d)}
+                    className="px-3 py-1.5 rounded-full text-sm font-medium transition-all"
+                    style={{
+                      background: form.diet_type === d ? 'var(--accent)' : 'var(--bg-input)',
+                      color: form.diet_type === d ? '#0D1117' : 'var(--text-secondary)',
+                      border: `1px solid ${form.diet_type === d ? 'var(--accent)' : 'var(--border)'}`,
+                    }}
+                  >
+                    {d}
+                  </button>
+                ))}
               </div>
-
-              <div>
-                <label className="label">Daily step goal</label>
-                <input
-                  className="input-base"
-                  type="number"
-                  placeholder="8000"
-                  value={form.daily_step_goal}
-                  onChange={e => update('daily_step_goal', e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="label">
-                  Target date <span style={{ color: 'var(--text-muted)' }}>(optional)</span>
-                </label>
-                <input
-                  className="input-base"
-                  type="date"
-                  value={form.target_date}
-                  onChange={e => update('target_date', e.target.value)}
-                />
-              </div>
-
-              {error && (
-                <p
-                  className="text-sm px-3 py-2 rounded-lg"
-                  style={{ color: 'var(--danger)', background: 'rgba(239,68,68,0.08)' }}
-                >
-                  {error}
-                </p>
+              {form.diet_type === 'Other' && (
+                <div>
+                  <label className="label">Describe your diet <span style={{ color: 'var(--text-muted)' }}>(max 20 chars)</span></label>
+                  <input className="input-base" placeholder="e.g. Raw food, OMAD..." maxLength={20} value={form.diet_custom} onChange={e => set('diet_custom', e.target.value)} />
+                </div>
               )}
-
-              <div className="flex gap-3">
+              <div className="flex gap-2">
                 <button className="btn-secondary flex-1" onClick={() => setStep(2)}>← Back</button>
-                <button
-                  className="btn-primary flex-1"
-                  onClick={handleSubmit}
-                  disabled={loading || !form.goal_weight}
-                >
-                  {loading ? 'Saving…' : "Let's go 🎯"}
-                </button>
+                <button className="btn-primary flex-1" onClick={() => setStep(4)}>Next →</button>
+              </div>
+              <button className="btn-secondary w-full text-sm" onClick={() => setStep(4)} style={{ opacity: 0.6 }}>Skip for now</button>
+            </div>
+          )}
+
+          {/* Step 4 — Height optional + finish */}
+          {step === 4 && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                Almost done!
+              </h2>
+              <div>
+                <label className="label">Height (optional)</label>
+                <input className="input-base" type="number" step="0.1" placeholder={unit === 'lbs' ? 'inches (e.g. 70)' : 'cm (e.g. 175)'} value={form.height} onChange={e => set('height', e.target.value)} />
+              </div>
+              <div className="p-3 rounded-xl" style={{ background: 'var(--accent-subtle)', border: '1px solid rgba(45,212,191,0.2)' }}>
+                <p className="text-xs font-medium mb-1" style={{ color: 'var(--accent-text)' }}>Your setup summary</p>
+                <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  {form.display_name} · {form.start_weight} → {form.goal_weight} {unit} · {parseInt(form.daily_step_goal).toLocaleString()} steps/day
+                  {form.diet_type ? ` · ${form.diet_type === 'Other' && form.diet_custom ? form.diet_custom : form.diet_type}` : ''}
+                </p>
+              </div>
+              {error && <p className="text-xs" style={{ color: 'var(--danger)' }}>{error}</p>}
+              <div className="flex gap-2">
+                <button className="btn-secondary flex-1" onClick={() => setStep(3)}>← Back</button>
+                <button className="btn-primary flex-1" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Start journey →'}</button>
               </div>
             </div>
           )}
