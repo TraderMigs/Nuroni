@@ -5,6 +5,12 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
+const DIET_OPTIONS = [
+  'Standard', 'Vegetarian', 'Vegan', 'Pescatarian',
+  'Keto', 'Ketovore', 'Carnivore', 'Mediterranean',
+  'Paleo', 'Intermittent Fasting', 'Gluten-Free', 'Dairy-Free', 'Other',
+]
+
 function Toast({ msg, onDone }: { msg: string; onDone: () => void }) {
   useEffect(() => { const t = setTimeout(onDone, 2500); return () => clearTimeout(t) }, [onDone])
   return <div className="toast">{msg}</div>
