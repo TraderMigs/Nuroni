@@ -28,3 +28,4 @@ Push to GitHub → Vercel auto-deploys.
 - Tailwind CSS
 - Recharts
 - PWA ready
+.
