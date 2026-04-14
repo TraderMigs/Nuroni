@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nuroni-v2'
+const CACHE_NAME = 'nuroni-v3'
 const STATIC_ASSETS = ['/', '/login', '/signup']
 
 self.addEventListener('install', (event) => {
@@ -26,22 +26,24 @@ self.addEventListener('fetch', (event) => {
   )
 })
 
-// Handle push notifications
+// Handle incoming push notifications from server
 self.addEventListener('push', (event) => {
-  const data = event.data ? event.data.json() : {}
-  const title = data.title || 'Nuroni'
-  const options = {
-    body: data.body || "Time to log your steps!",
-    icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
-    tag: 'nuroni-reminder',
-    renotify: true,
-    data: { url: data.url || '/progress' },
-  }
-  event.waitUntil(self.registration.showNotification(title, options))
+  let data = { title: 'Nuroni', body: "Time to log your steps!", url: '/progress' }
+  try { if (event.data) data = { ...data, ...event.data.json() } } catch {}
+
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      tag: 'nuroni-reminder',
+      renotify: true,
+      data: { url: data.url },
+    })
+  )
 })
 
-// Tap notification → open app
+// Tap notification → open app to /progress
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   const url = event.notification.data?.url || '/progress'
@@ -58,38 +60,3 @@ self.addEventListener('notificationclick', (event) => {
     })
   )
 })
-
-// Scheduled reminder via setTimeout loop
-self.addEventListener('message', (event) => {
-  if (event.data?.type === 'SCHEDULE_REMINDER') {
-    const { hour, minute } = event.data
-    scheduleDaily(hour, minute)
-  }
-  if (event.data?.type === 'CANCEL_REMINDER') {
-    if (self._reminderTimeout) clearTimeout(self._reminderTimeout)
-  }
-})
-
-function scheduleDaily(hour, minute) {
-  if (self._reminderTimeout) clearTimeout(self._reminderTimeout)
-
-  const now = new Date()
-  const next = new Date()
-  next.setHours(hour, minute, 0, 0)
-  if (next <= now) next.setDate(next.getDate() + 1)
-
-  const delay = next.getTime() - now.getTime()
-
-  self._reminderTimeout = setTimeout(() => {
-    self.registration.showNotification('Nuroni — Log your steps! 🏃', {
-      body: "Don't forget to log your steps and weight today.",
-      icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
-      tag: 'nuroni-reminder',
-      renotify: true,
-      data: { url: '/progress' },
-    })
-    // Schedule again for tomorrow
-    scheduleDaily(hour, minute)
-  }, delay)
-}
