@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
   let sent = 0
 
   for (const user of users ?? []) {
-    for (const sub of user.push_subscriptions ?? []) {
+    for (const sub of (user as any).push_subscriptions ?? []) {
       try {
         await webpush.sendNotification(
           sub.subscription,
@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
         )
         sent++
       } catch {
-        // subscription may be expired, skip
+        // expired subscription, skip
       }
     }
   }
