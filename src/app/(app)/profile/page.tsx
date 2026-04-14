@@ -28,6 +28,8 @@ export default function ProfilePage() {
     distance_unit: 'miles',
     start_weight: '',
     is_public: true,
+    diet_type: '',
+    diet_custom: '',
   })
 
   const load = useCallback(async () => {
@@ -45,6 +47,8 @@ export default function ProfilePage() {
         distance_unit: p.distance_unit || 'miles',
         start_weight: p.start_weight ? String(p.start_weight) : '',
         is_public: p.is_public ?? true,
+        diet_type: p.diet_type || '',
+        diet_custom: p.diet_custom || '',
       })
     }
     setLoading(false)
