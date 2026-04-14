@@ -63,6 +63,8 @@ export default function ProfilePage() {
       distance_unit: form.distance_unit,
       start_weight: parseFloat(form.start_weight),
       is_public: form.is_public,
+      diet_type: form.diet_type || null,
+      diet_custom: form.diet_type === 'Other' ? form.diet_custom : null,
     })
     setSaving(false)
     if (!error) setToast('Profile saved ✓')
@@ -174,6 +176,31 @@ export default function ProfilePage() {
             <span className="inline-block h-4 w-4 rounded-full bg-white transition-transform" style={{ transform: form.is_public ? 'translateX(24px)' : 'translateX(4px)' }} />
           </button>
         </div>
+        {/* Diet type */}
+        <div>
+          <label className="label">Diet type <span style={{ color: 'var(--text-muted)' }}>(optional)</span></label>
+          <div className="flex flex-wrap gap-1.5 mt-1">
+            {DIET_OPTIONS.map(d => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setForm(f => ({ ...f, diet_type: f.diet_type === d ? '' : d }))}
+                className="px-2.5 py-1 rounded-full text-xs font-medium transition-all"
+                style={{
+                  background: form.diet_type === d ? 'var(--accent)' : 'var(--bg-input)',
+                  color: form.diet_type === d ? '#0D1117' : 'var(--text-secondary)',
+                  border: `1px solid ${form.diet_type === d ? 'var(--accent)' : 'var(--border)'}`,
+                }}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+          {form.diet_type === 'Other' && (
+            <input className="input-base mt-2" placeholder="Describe (max 20 chars)" maxLength={20} value={form.diet_custom} onChange={e => setForm(f => ({ ...f, diet_custom: e.target.value }))} />
+          )}
+        </div>
+
         <button className="btn-primary w-full" onClick={save} disabled={saving || !form.display_name || !form.username}>
           {saving ? 'Saving…' : 'Save profile'}
         </button>
