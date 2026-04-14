@@ -2,7 +2,7 @@
 
 > Track less. Show real progress.
 
-## Setup
+## Setup.
 
 ### 1. Environment Variables
 In Vercel, add these environment variables:
@@ -30,3 +30,4 @@ Push to GitHub → Vercel auto-deploys.
 - PWA ready
 .
 trigger deploy
+.
