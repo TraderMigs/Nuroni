@@ -33,8 +33,6 @@ export async function POST(req: NextRequest) {
     return typeof c === 'string' ? c : c.id
   }
 
-  // Primary lookup by stripe_customer_id
-  // Fallback to metadata.supabase_user_id if no match
   async function getUserId(customerId: string | null, metadata?: Stripe.Metadata | null): Promise<string | null> {
     if (customerId) {
       const { data } = await supabaseAdmin
@@ -44,8 +42,6 @@ export async function POST(req: NextRequest) {
         .maybeSingle()
       if (data?.id) return data.id
     }
-
-    // Fallback — use metadata user ID if customer lookup failed
     const metaUserId = metadata?.supabase_user_id
     if (metaUserId) {
       const { data } = await supabaseAdmin
@@ -55,7 +51,6 @@ export async function POST(req: NextRequest) {
         .maybeSingle()
       if (data?.id) return data.id
     }
-
     return null
   }
 
@@ -68,15 +63,14 @@ export async function POST(req: NextRequest) {
 
       const subId = typeof session.subscription === 'string'
         ? session.subscription
-        : session.subscription?.id
+        : session.subscription?.id ?? null
 
-      // Belt-and-suspenders: always write stripe_customer_id in case it was missing
-      await supabaseAdmin.from('profiles').update({
-        is_plus: true,
-        stripe_subscription_id: subId ?? null,
-        stripe_customer_id: customerId,
-        plus_expires_at: null,
-      }).eq('id', userId)
+      // Use SECURITY DEFINER RPC — bypasses RLS entirely
+      await supabaseAdmin.rpc('grant_plus_to_user', {
+        p_user_id: userId,
+        p_stripe_customer_id: customerId,
+        p_stripe_subscription_id: subId,
+      })
       break
     }
 
@@ -86,11 +80,11 @@ export async function POST(req: NextRequest) {
       const customerId = getCustomerId(sub)
       const userId = await getUserId(customerId, sub.metadata)
       if (!userId) break
-      await supabaseAdmin.from('profiles').update({
-        is_plus: false,
-        stripe_subscription_id: null,
-        plus_expires_at: new Date().toISOString(),
-      }).eq('id', userId)
+
+      // Use SECURITY DEFINER RPC — bypasses RLS entirely
+      await supabaseAdmin.rpc('revoke_plus_from_user', {
+        p_user_id: userId,
+      })
       break
     }
 
@@ -100,10 +94,18 @@ export async function POST(req: NextRequest) {
       const userId = await getUserId(customerId, sub.metadata)
       if (!userId) break
       const isActive = sub.status === 'active' || sub.status === 'trialing'
-      await supabaseAdmin.from('profiles').update({
-        is_plus: isActive,
-        stripe_customer_id: customerId,
-      }).eq('id', userId)
+
+      if (isActive) {
+        await supabaseAdmin.rpc('grant_plus_to_user', {
+          p_user_id: userId,
+          p_stripe_customer_id: customerId,
+          p_stripe_subscription_id: sub.id,
+        })
+      } else {
+        await supabaseAdmin.rpc('revoke_plus_from_user', {
+          p_user_id: userId,
+        })
+      }
       break
     }
   }
