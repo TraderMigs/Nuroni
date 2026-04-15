@@ -11,6 +11,21 @@ const DIET_OPTIONS = [
   'Paleo', 'Intermittent Fasting', 'Gluten-Free', 'Dairy-Free', 'Other',
 ]
 
+const CATEGORY_COLORS: Record<string, string> = {
+  Gym: '#2dd4bf',
+  Walk: '#60a5fa',
+  Meal: '#f59e0b',
+  Other: '#a78bfa',
+}
+
+interface ProofPhoto {
+  id: string
+  photo_url: string
+  category: string
+  created_at: string
+  is_public: boolean
+}
+
 function Toast({ msg, onDone }: { msg: string; onDone: () => void }) {
   useEffect(() => { const t = setTimeout(onDone, 2500); return () => clearTimeout(t) }, [onDone])
   return <div className="toast">{msg}</div>
@@ -25,6 +40,13 @@ export default function ProfilePage() {
   const [toast, setToast] = useState('')
   const [userId, setUserId] = useState('')
   const [isPlus, setIsPlus] = useState(false)
+  const [proofPhotosPublic, setProofPhotosPublic] = useState(true)
+
+  // Proof photos state
+  const [proofPhotos, setProofPhotos] = useState<ProofPhoto[]>([])
+  const [proofExpanded, setProofExpanded] = useState(false)
+  const [fullscreenPhoto, setFullscreenPhoto] = useState<ProofPhoto | null>(null)
+  const [deletingPhotoId, setDeletingPhotoId] = useState<string | null>(null)
 
   const [form, setForm] = useState({
     display_name: '',
@@ -45,6 +67,7 @@ export default function ProfilePage() {
     const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
     if (p) {
       setIsPlus(p.is_plus || false)
+      setProofPhotosPublic(p.proof_photos_public ?? true)
       setForm({
         display_name: p.display_name || '',
         username: p.username || '',
@@ -56,6 +79,14 @@ export default function ProfilePage() {
         diet_type: p.diet_type || '',
         diet_custom: p.diet_custom || '',
       })
+
+      // Load proof photos
+      const { data: photos } = await supabase
+        .from('proof_photos')
+        .select('id, photo_url, category, created_at, is_public')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+      setProofPhotos(photos || [])
     }
     setLoading(false)
   }, [supabase, router])
@@ -91,6 +122,17 @@ export default function ProfilePage() {
   function copyLink() {
     navigator.clipboard.writeText(`${window.location.origin}/u/${form.username}`)
     setToast('Link copied!')
+  }
+
+  async function deleteProofPhoto(photoId: string) {
+    setDeletingPhotoId(photoId)
+    const { error } = await supabase.from('proof_photos').delete().eq('id', photoId)
+    if (!error) {
+      setProofPhotos(prev => prev.filter(p => p.id !== photoId))
+      setFullscreenPhoto(null)
+      setToast('Photo deleted')
+    }
+    setDeletingPhotoId(null)
   }
 
   if (loading) return (
@@ -216,6 +258,90 @@ export default function ProfilePage() {
         </button>
       </div>
 
+      {/* Proof of the Day — owner grid */}
+      {isPlus && (
+        <div className="card p-4 mt-4">
+          <button
+            onClick={() => setProofExpanded(v => !v)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', width: '100%', padding: 0 }}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                  Proof of the Day
+                </h2>
+                {proofPhotos.length > 0 && (
+                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
+                    {proofPhotos.length}
+                  </span>
+                )}
+                {!proofPhotosPublic && (
+                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--danger)' }}>
+                    Private
+                  </span>
+                )}
+              </div>
+              <svg
+                width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                strokeLinecap="round" strokeLinejoin="round"
+                style={{ color: 'var(--text-muted)', transform: proofExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
+              >
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </div>
+          </button>
+
+          {proofExpanded && (
+            <div className="mt-3 animate-fade-in">
+              {proofPhotos.length === 0 ? (
+                <p className="text-xs text-center py-4" style={{ color: 'var(--text-muted)' }}>
+                  No proof yet — start posting in chat!
+                </p>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                  {proofPhotos.map(photo => (
+                    <div
+                      key={photo.id}
+                      className="relative cursor-pointer"
+                      style={{ aspectRatio: '1', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)' }}
+                      onClick={() => setFullscreenPhoto(photo)}
+                    >
+                      <img
+                        src={photo.photo_url}
+                        alt={photo.category}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      />
+                      <div style={{ position: 'absolute', bottom: 4, left: 4 }}>
+                        <span
+                          style={{
+                            fontSize: 9,
+                            fontWeight: 700,
+                            padding: '2px 5px',
+                            borderRadius: 4,
+                            background: `${CATEGORY_COLORS[photo.category] || '#888'}cc`,
+                            color: '#fff',
+                            backdropFilter: 'blur(4px)',
+                          }}
+                        >
+                          {photo.category}
+                        </span>
+                      </div>
+                      {!proofPhotosPublic && (
+                        <div style={{ position: 'absolute', top: 4, right: 4 }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
+                            <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                          </svg>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <Link
         href="/settings"
         className="card p-4 mt-4 flex items-center justify-between"
@@ -229,6 +355,64 @@ export default function ProfilePage() {
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </Link>
+
+      {/* Fullscreen photo viewer with delete */}
+      {fullscreenPhoto && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.92)' }}
+          onClick={() => setFullscreenPhoto(null)}
+        >
+          <button
+            onClick={() => setFullscreenPhoto(null)}
+            style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'white' }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+          <div onClick={e => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+            <img
+              src={fullscreenPhoto.photo_url}
+              alt="Proof"
+              style={{ maxWidth: '90vw', maxHeight: '75vh', objectFit: 'contain', borderRadius: 12 }}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  background: `${CATEGORY_COLORS[fullscreenPhoto.category] || '#888'}33`,
+                  color: CATEGORY_COLORS[fullscreenPhoto.category] || '#888',
+                  border: `1px solid ${CATEGORY_COLORS[fullscreenPhoto.category] || '#888'}55`,
+                }}
+              >
+                {fullscreenPhoto.category}
+              </span>
+              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>
+                {new Date(fullscreenPhoto.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              </span>
+            </div>
+            <button
+              onClick={() => deleteProofPhoto(fullscreenPhoto.id)}
+              disabled={deletingPhotoId === fullscreenPhoto.id}
+              style={{
+                background: 'rgba(239,68,68,0.15)',
+                color: '#f87171',
+                border: '1px solid rgba(239,68,68,0.3)',
+                borderRadius: 10,
+                padding: '8px 20px',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+                opacity: deletingPhotoId === fullscreenPhoto.id ? 0.5 : 1,
+              }}
+            >
+              {deletingPhotoId === fullscreenPhoto.id ? 'Deleting…' : 'Delete photo'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
