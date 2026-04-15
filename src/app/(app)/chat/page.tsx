@@ -721,7 +721,7 @@ export default function ChatPage() {
       )}
 
       {/* Countdown bar — shown when user can't post yet */}
-      {!isAdmin && canPostProof === false && countdown && (
+      {canPostProof === false && countdown && (
         <div className="mx-4 mb-1 px-3 py-2 rounded-xl text-xs text-center" style={{ background: 'rgba(45,212,191,0.06)', color: 'var(--text-muted)', border: '1px solid rgba(45,212,191,0.15)' }}>
           Next Proof of the Day in <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{countdown}</span>
         </div>
@@ -739,7 +739,7 @@ export default function ChatPage() {
               </button>
             </>
           )}
-          {!isAdmin && (
+          {(
             <>
               <input ref={proofFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleProofFileSelect} />
               <button
