@@ -27,16 +27,21 @@ export default function SettingsPage() {
   const [reminderTime, setReminderTime] = useState('20:00')
   const [notifPermission, setNotifPermission] = useState<string>('default')
   const [savingReminder, setSavingReminder] = useState(false)
+  const [proofPhotosPublic, setProofPhotosPublic] = useState(true)
+  const [savingPrivacy, setSavingPrivacy] = useState(false)
+  const [userId, setUserId] = useState('')
 
   useEffect(() => {
     if ('Notification' in window) setNotifPermission(Notification.permission)
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const { data } = await supabase.from('profiles').select('reminder_enabled, reminder_time').eq('id', user.id).maybeSingle()
+      setUserId(user.id)
+      const { data } = await supabase.from('profiles').select('reminder_enabled, reminder_time, proof_photos_public').eq('id', user.id).maybeSingle()
       if (data) {
         setReminderEnabled(data.reminder_enabled || false)
         setReminderTime(data.reminder_time || '20:00')
+        setProofPhotosPublic(data.proof_photos_public ?? true)
       }
     }
     load()
@@ -73,7 +78,6 @@ export default function SettingsPage() {
         }
       }
 
-      // Register push subscription with server
       const sub = await registerPush()
       if (!sub) {
         setToast('Could not register for notifications')
@@ -87,7 +91,6 @@ export default function SettingsPage() {
         body: JSON.stringify({ subscription: sub }),
       })
     } else {
-      // Remove push subscription
       await fetch('/api/push/subscribe', { method: 'DELETE' })
       if ('serviceWorker' in navigator) {
         const reg = await navigator.serviceWorker.ready
@@ -109,11 +112,21 @@ export default function SettingsPage() {
     setSavingReminder(false)
   }
 
+  async function saveProofPrivacy(val: boolean) {
+    setSavingPrivacy(true)
+    await supabase.from('profiles').update({ proof_photos_public: val }).eq('id', userId)
+    setProofPhotosPublic(val)
+    setSavingPrivacy(false)
+    setToast(val ? 'Proof photos set to public ✓' : 'Proof photos set to private ✓')
+  }
+
   async function handleDeleteAccount() {
     if (confirmText !== 'DELETE') return
     setDeleting(true)
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
+    await supabase.from('proof_hearts').delete().eq('user_id', user.id)
+    await supabase.from('proof_photos').delete().eq('user_id', user.id)
     await supabase.from('messages').delete().eq('user_id', user.id)
     await supabase.from('entries').delete().eq('user_id', user.id)
     await supabase.from('goals').delete().eq('user_id', user.id)
@@ -178,6 +191,24 @@ export default function SettingsPage() {
         )}
       </div>
 
+      {/* Privacy */}
+      <div className="card p-4 mb-4">
+        <h2 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Privacy</h2>
+        <div className="flex items-center justify-between">
+          <div style={{ flex: 1, marginRight: 12 }}>
+            <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Proof of the Day photos</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>Let others see your daily photo history on your profile</p>
+          </div>
+          <button
+            onClick={() => saveProofPrivacy(!proofPhotosPublic)}
+            disabled={savingPrivacy}
+            style={{ background: proofPhotosPublic ? 'var(--accent)' : 'var(--border)', width: 44, height: 26, borderRadius: 999, position: 'relative', border: 'none', cursor: 'pointer', transition: 'background 0.2s', flexShrink: 0 }}
+          >
+            <div style={{ position: 'absolute', top: 3, width: 20, height: 20, background: 'white', borderRadius: '50%', transition: 'left 0.2s', left: proofPhotosPublic ? '21px' : '3px' }} />
+          </button>
+        </div>
+      </div>
+
       {/* Legal */}
       <div className="card p-4 mb-4">
         <h2 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Legal</h2>
@@ -222,7 +253,7 @@ export default function SettingsPage() {
         ) : (
           <div className="space-y-3">
             <div className="p-3 rounded-xl text-sm" style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--danger)' }}>
-              This will permanently delete your profile, all entries, goals, and chat messages. Cancel your Plus+ subscription first in Profile.
+              This will permanently delete your profile, all entries, goals, chat messages, and proof photos. Cancel your Plus+ subscription first in Profile.
             </div>
             <div>
               <label className="label">Type DELETE to confirm</label>
