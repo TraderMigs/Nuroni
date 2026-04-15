@@ -2,15 +2,17 @@ name: AI Coach Messages
 
 on:
   schedule:
-    - cron: '0 8 * * *'   # 8AM UTC — morning
-    - cron: '0 12 * * *'  # 12PM UTC — midday
-    - cron: '0 17 * * *'  # 5PM UTC — afternoon
-    - cron: '0 21 * * *'  # 9PM UTC — evening
-  workflow_dispatch:       # allow manual trigger
+    - cron: '0 8 * * *'    # 8AM UTC — morning (all coaches)
+    - cron: '0 12 * * *'   # 12PM UTC — midday (all coaches)
+    - cron: '0 17 * * *'   # 5PM UTC — afternoon (all coaches)
+    - cron: '0 21 * * *'   # 9PM UTC — evening (all coaches)
+    - cron: '0 6 * * 1-5'  # 6AM UTC Mon-Fri — Blaze morning motivation only
+  workflow_dispatch:
 
 jobs:
   post-maya:
     runs-on: ubuntu-latest
+    if: github.event.schedule != '0 6 * * 1-5'
     steps:
       - name: Post Coach Maya message
         run: |
@@ -22,10 +24,11 @@ jobs:
 
   post-dex:
     runs-on: ubuntu-latest
+    if: github.event.schedule != '0 6 * * 1-5'
     steps:
       - name: Post Coach Dex message
         run: |
-          sleep 30
+          sleep 20
           curl -s -X POST \
             "${{ secrets.SUPABASE_FUNCTION_URL }}/post-coach-message" \
             -H "Authorization: Bearer ${{ secrets.COACH_SECRET }}" \
@@ -34,12 +37,51 @@ jobs:
 
   post-riley:
     runs-on: ubuntu-latest
+    if: github.event.schedule != '0 6 * * 1-5'
     steps:
       - name: Post Coach Riley message
+        run: |
+          sleep 40
+          curl -s -X POST \
+            "${{ secrets.SUPABASE_FUNCTION_URL }}/post-coach-message" \
+            -H "Authorization: Bearer ${{ secrets.COACH_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"coach":"riley"}'
+
+  post-nova:
+    runs-on: ubuntu-latest
+    if: github.event.schedule != '0 6 * * 1-5'
+    steps:
+      - name: Post Coach Nova message
         run: |
           sleep 60
           curl -s -X POST \
             "${{ secrets.SUPABASE_FUNCTION_URL }}/post-coach-message" \
             -H "Authorization: Bearer ${{ secrets.COACH_SECRET }}" \
             -H "Content-Type: application/json" \
-            -d '{"coach":"riley"}'
+            -d '{"coach":"nova"}'
+
+  post-blaze:
+    runs-on: ubuntu-latest
+    if: github.event.schedule != '0 6 * * 1-5'
+    steps:
+      - name: Post Coach Blaze message
+        run: |
+          sleep 80
+          curl -s -X POST \
+            "${{ secrets.SUPABASE_FUNCTION_URL }}/post-coach-message" \
+            -H "Authorization: Bearer ${{ secrets.COACH_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"coach":"blaze"}'
+
+  blaze-morning-motivation:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 6 * * 1-5'
+    steps:
+      - name: Post Blaze morning motivation
+        run: |
+          curl -s -X POST \
+            "${{ secrets.SUPABASE_FUNCTION_URL }}/post-coach-message" \
+            -H "Authorization: Bearer ${{ secrets.COACH_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"coach":"blaze","type":"motivation"}'
