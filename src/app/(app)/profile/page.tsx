@@ -190,8 +190,8 @@ export default function ProfilePage() {
         <div>
           <label className="label">Username</label>
           <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-muted)' }}>@</span>
-            <input className="input-base pl-7" placeholder="alexfit" value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase() }))} />
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium select-none" style={{ color: 'var(--text-muted)', lineHeight: 1 }}>@</span>
+            <input className="input-base" style={{ paddingLeft: '1.75rem' }} placeholder="alexfit" value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase() }))} />
           </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
