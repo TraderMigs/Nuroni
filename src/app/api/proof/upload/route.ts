@@ -18,7 +18,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Plus+ required' }, { status: 403 })
     }
 
-    // Server-side 24-hour enforcement: check last upload
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
     const { data: recent } = await supabase
       .from('proof_photos')
@@ -67,7 +66,6 @@ export async function POST(req: NextRequest) {
       .from('chat-media')
       .getPublicUrl(uploadData.path)
 
-    // Insert into proof_photos
     const { data: photoRow, error: photoError } = await adminClient
       .from('proof_photos')
       .insert({ user_id: user.id, photo_url: publicUrl, category })
@@ -76,10 +74,10 @@ export async function POST(req: NextRequest) {
 
     if (photoError) return NextResponse.json({ error: photoError.message }, { status: 500 })
 
-    // Insert message into chat with media_type = 'proof_photo'
+    // category stored in both payload AND content as fallback
     await adminClient.from('messages').insert({
       user_id: user.id,
-      content: '',
+      content: 'proof_category:' + category,
       media_url: publicUrl,
       media_type: 'proof_photo',
       payload: { photo_id: photoRow.id, category },
@@ -92,7 +90,6 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// GET: check if user already posted in last 24 hours
 export async function GET() {
   try {
     const supabase = await createClient()
