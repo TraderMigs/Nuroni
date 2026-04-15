@@ -18,6 +18,7 @@ interface Message {
   current_weight?: number
   is_admin?: boolean
   is_coach?: boolean
+  quick_replies?: string[] | null
 }
 
 interface ProfileModal {
@@ -95,6 +96,7 @@ export default function ChatPage() {
   const [profileModal, setProfileModal] = useState<ProfileModal | null>(null)
   const [followLoading, setFollowLoading] = useState(false)
   const [showTip, setShowTip] = useState(false)
+  const [usedQuickReplies, setUsedQuickReplies] = useState<Set<string>>(new Set())
 
   const fetchProfiles = useCallback(async (userIds: string[]) => {
     const { data: profiles } = await supabase
@@ -208,6 +210,16 @@ export default function ChatPage() {
     }
   }, [showTip])
 
+  function buildContext(currentMessages: Message[], currentUserId: string): { role: string; content: string }[] {
+    return currentMessages
+      .slice(-6)
+      .filter(m => m.content)
+      .map(m => ({
+        role: COACH_IDS.has(m.user_id) ? 'assistant' : 'user',
+        content: m.content,
+      }))
+  }
+
   async function openProfile(msg: Message) {
     if (!msg.username || msg.is_coach || COACH_IDS.has(msg.user_id)) return
     const { data: goal } = await supabase
@@ -251,39 +263,45 @@ export default function ChatPage() {
     localStorage.setItem('nuroni-chat-tip', '1')
   }
 
-  async function sendMessage(mediaUrl?: string, mediaType?: string) {
-    const text = input.trim()
-    if (!text && !mediaUrl) return
+  async function sendMessage(text?: string, mediaUrl?: string, mediaType?: string) {
+    const content = (text || input).trim()
+    if (!content && !mediaUrl) return
     if (sending) return
-    if (!isAdmin && text && isBlocked(text)) {
+    if (!isAdmin && content && isBlocked(content)) {
       setBlockedNotice(true)
       setTimeout(() => setBlockedNotice(false), 3000)
       return
     }
 
     const tempId = `temp-${Date.now()}`
-    const optimistic: Message = { id: tempId, user_id: userId, content: text, media_url: mediaUrl || null, media_type: mediaType || null, created_at: new Date().toISOString(), ...profileCache[userId] }
+    const optimistic: Message = { id: tempId, user_id: userId, content, media_url: mediaUrl || null, media_type: mediaType || null, created_at: new Date().toISOString(), ...profileCache[userId] }
     setMessages(prev => [...prev, optimistic])
-    setInput('')
+    if (!text) setInput('')
     inputRef.current?.focus()
 
     setSending(true)
-    const { data, error } = await supabase.from('messages').insert({ user_id: userId, content: text, media_url: mediaUrl || null, media_type: mediaType || null }).select().maybeSingle()
+    const { data, error } = await supabase.from('messages').insert({ user_id: userId, content, media_url: mediaUrl || null, media_type: mediaType || null }).select().maybeSingle()
     setSending(false)
 
     if (error) {
       setMessages(prev => prev.filter(m => m.id !== tempId))
-      if (!mediaUrl) setInput(text)
+      if (!text && !mediaUrl) setInput(content)
     } else if (data) {
       setMessages(prev => prev.map(m => m.id === tempId ? { ...data, ...profileCache[userId] } : m))
-      if (text) {
+      if (content) {
+        const context = buildContext(messages, userId)
         fetch('/api/coach', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: text, user_id: userId }),
+          body: JSON.stringify({ content, user_id: userId, context }),
         }).catch(() => {})
       }
     }
+  }
+
+  async function handleQuickReply(msgId: string, reply: string) {
+    setUsedQuickReplies(prev => new Set(Array.from(prev).concat(msgId)))
+    await sendMessage(reply)
   }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -360,6 +378,9 @@ export default function ChatPage() {
           const isFollowed = followedIds.has(msg.user_id)
           const showName = !isMe && (i === 0 || messages[i - 1].user_id !== msg.user_id)
           const lostSoFar = msg.start_weight && msg.current_weight ? parseFloat((msg.start_weight - msg.current_weight).toFixed(1)) : null
+          const hasQuickReplies = isCoach && msg.quick_replies && msg.quick_replies.length > 0 && !usedQuickReplies.has(msg.id)
+          // Only show quick replies on the last coach message
+          const isLastCoachMsg = hasQuickReplies && !messages.slice(i + 1).some(m => COACH_IDS.has(m.user_id))
 
           return (
             <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
@@ -424,6 +445,41 @@ export default function ChatPage() {
                   <MessageContent content={msg.content} isAdmin={!!(msg.is_admin || isMe)} isMe={isMe} />
                 </div>
               )}
+
+              {/* Quick reply pills — only on last coach message with question */}
+              {isLastCoachMsg && (
+                <div className="flex flex-wrap gap-1.5 mt-2 max-w-[85%]">
+                  {msg.quick_replies!.map((reply, ri) => (
+                    <button
+                      key={ri}
+                      onClick={() => handleQuickReply(msg.id, reply)}
+                      disabled={sending}
+                      className="text-xs px-3 py-1.5 rounded-full font-medium transition-all"
+                      style={{
+                        background: 'rgba(167,139,250,0.1)',
+                        color: '#a78bfa',
+                        border: '1px solid rgba(167,139,250,0.35)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {reply}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setUsedQuickReplies(prev => new Set(Array.from(prev).concat(msg.id)))}
+                    className="text-xs px-3 py-1.5 rounded-full font-medium transition-all"
+                    style={{
+                      background: 'var(--bg-input)',
+                      color: 'var(--text-muted)',
+                      border: '1px solid var(--border)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Other...
+                  </button>
+                </div>
+              )}
+
               <span className="text-xs mt-0.5 mx-1" style={{ color: 'var(--text-muted)' }}>{formatTime(msg.created_at)}</span>
             </div>
           )
