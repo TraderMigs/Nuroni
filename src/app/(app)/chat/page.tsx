@@ -19,6 +19,7 @@ interface Message {
   is_admin?: boolean
   is_coach?: boolean
   quick_replies?: string[] | null
+  payload?: { photo_id?: string; category?: string } | null
 }
 
 interface ProfileModal {
@@ -30,6 +31,10 @@ interface ProfileModal {
   goal_weight: number | null
   weight_unit: string
   follower_count: number
+}
+
+interface HeartState {
+  [photoId: string]: { count: number; hearted: boolean }
 }
 
 const COACH_IDS = new Set([
@@ -46,6 +51,13 @@ const COACH_SPECIALTIES: Record<string, string> = {
   '00000000-0000-0000-0000-000000000003': 'Cardio & Conditioning',
   '00000000-0000-0000-0000-000000000004': 'Nutrition & Diet',
   '00000000-0000-0000-0000-000000000005': 'Mindset & Motivation',
+}
+
+const CATEGORY_COLORS: Record<string, string> = {
+  Gym: '#2dd4bf',
+  Walk: '#60a5fa',
+  Meal: '#f59e0b',
+  Other: '#a78bfa',
 }
 
 const BLOCKED_PATTERNS = [
@@ -92,6 +104,7 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const proofFileInputRef = useRef<HTMLInputElement>(null)
 
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -107,6 +120,15 @@ export default function ChatPage() {
   const [followLoading, setFollowLoading] = useState(false)
   const [showTip, setShowTip] = useState(false)
   const [usedQuickReplies, setUsedQuickReplies] = useState<Set<string>>(new Set())
+  const [heartState, setHeartState] = useState<HeartState>({})
+  const [fullscreenPhoto, setFullscreenPhoto] = useState<string | null>(null)
+
+  // Proof of the Day state
+  const [canPostProof, setCanPostProof] = useState<boolean | null>(null)
+  const [nextAllowedAt, setNextAllowedAt] = useState<string | null>(null)
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false)
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+  const [proofToast, setProofToast] = useState('')
 
   const fetchProfiles = useCallback(async (userIds: string[]) => {
     const { data: profiles } = await supabase
@@ -137,6 +159,42 @@ export default function ChatPage() {
     })
     return result
   }, [supabase])
+
+  async function checkProofStatus() {
+    const res = await fetch('/api/proof/upload')
+    if (res.ok) {
+      const data = await res.json()
+      setCanPostProof(data.can_post)
+      setNextAllowedAt(data.next_allowed_at || null)
+    }
+  }
+
+  async function loadHeartStates(msgs: Message[]) {
+    const proofMsgs = msgs.filter(m => m.media_type === 'proof_photo' && m.payload?.photo_id)
+    if (proofMsgs.length === 0) return
+
+    const photoIds = proofMsgs.map(m => m.payload!.photo_id!)
+
+    // Get heart counts
+    const { data: hearts } = await supabase
+      .from('proof_hearts')
+      .select('photo_id, user_id')
+      .in('photo_id', photoIds)
+
+    const counts: Record<string, number> = {}
+    const myHearts = new Set<string>()
+
+    hearts?.forEach(h => {
+      counts[h.photo_id] = (counts[h.photo_id] || 0) + 1
+      if (h.user_id === userId) myHearts.add(h.photo_id)
+    })
+
+    const newState: HeartState = {}
+    photoIds.forEach(id => {
+      newState[id] = { count: counts[id] || 0, hearted: myHearts.has(id) }
+    })
+    setHeartState(prev => ({ ...prev, ...newState }))
+  }
 
   useEffect(() => {
     let cleanup: (() => void) | undefined
@@ -177,6 +235,25 @@ export default function ChatPage() {
           setProfileCache(cache)
           setMessages(prev => prev.map(m => ({ ...m, ...cache[m.user_id] })))
         })
+        // Load heart states after userId is known
+        setTimeout(() => loadHeartStates(initialMsgs), 200)
+      }
+
+      // Check proof status
+      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+      const { data: recent } = await supabase
+        .from('proof_photos')
+        .select('id, created_at')
+        .eq('user_id', user.id)
+        .gte('created_at', twentyFourHoursAgo)
+        .limit(1)
+
+      if (recent && recent.length > 0) {
+        setCanPostProof(false)
+        const next = new Date(new Date(recent[0].created_at).getTime() + 24 * 60 * 60 * 1000)
+        setNextAllowedAt(next.toISOString())
+      } else {
+        setCanPostProof(true)
       }
 
       const channel = supabase
@@ -199,6 +276,13 @@ export default function ChatPage() {
             })
             return cache
           })
+          // Load heart state for new proof photos
+          if (newMsg.media_type === 'proof_photo' && newMsg.payload?.photo_id) {
+            setHeartState(prev => ({
+              ...prev,
+              [newMsg.payload!.photo_id!]: { count: 0, hearted: false },
+            }))
+          }
         })
         .subscribe()
 
@@ -219,6 +303,13 @@ export default function ChatPage() {
       return () => clearTimeout(t)
     }
   }, [showTip])
+
+  useEffect(() => {
+    if (proofToast) {
+      const t = setTimeout(() => setProofToast(''), 3000)
+      return () => clearTimeout(t)
+    }
+  }, [proofToast])
 
   function buildContext(currentMessages: Message[]): { role: string; content: string; coach_id?: string; had_quick_replies?: boolean }[] {
     return currentMessages
@@ -275,12 +366,33 @@ export default function ChatPage() {
     localStorage.setItem('nuroni-chat-tip', '1')
   }
 
+  async function toggleHeart(photoId: string) {
+    if (!userId) return
+    const current = heartState[photoId] || { count: 0, hearted: false }
+
+    if (current.hearted) {
+      // Optimistic remove
+      setHeartState(prev => ({
+        ...prev,
+        [photoId]: { count: Math.max(0, prev[photoId]?.count - 1), hearted: false },
+      }))
+      await supabase.from('proof_hearts').delete()
+        .eq('photo_id', photoId).eq('user_id', userId)
+    } else {
+      // Optimistic add
+      setHeartState(prev => ({
+        ...prev,
+        [photoId]: { count: (prev[photoId]?.count || 0) + 1, hearted: true },
+      }))
+      await supabase.from('proof_hearts').insert({ photo_id: photoId, user_id: userId })
+    }
+  }
+
   async function sendMessage(text?: string, mediaUrl?: string, mediaType?: string, fromPill?: boolean) {
     const content = (text || input).trim()
     if (!content && !mediaUrl) return
     if (sending) return
 
-    // Block @mentions to prevent tagging real users — @coach is the only allowed prefix
     const atMentionBlocked = !isAdmin && /(?<!^)@(?!coach\b)/i.test(content)
     if (!isAdmin && content && (isBlocked(content) || atMentionBlocked)) {
       setBlockedNotice(true)
@@ -337,6 +449,56 @@ export default function ChatPage() {
       if (!error && msgData) setMessages(prev => prev.map(m => m.id === tempId ? { ...msgData, ...profileCache[userId] } : m))
     }
     if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  function handleProofButtonClick() {
+    if (!canPostProof) {
+      if (nextAllowedAt) {
+        const next = new Date(nextAllowedAt)
+        const hours = Math.ceil((next.getTime() - Date.now()) / (1000 * 60 * 60))
+        setProofToast(`Next Proof of the Day available in ~${hours}h`)
+      } else {
+        setProofToast('Already posted your Proof of the Day!')
+      }
+      return
+    }
+    setShowCategoryPicker(true)
+  }
+
+  function handleCategorySelect(cat: string) {
+    setSelectedCategory(cat)
+    setShowCategoryPicker(false)
+    setTimeout(() => proofFileInputRef.current?.click(), 100)
+  }
+
+  async function handleProofFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !selectedCategory) return
+    if (file.size > 10 * 1024 * 1024) { setProofToast('Max 10MB'); return }
+
+    setUploading(true)
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('category', selectedCategory)
+
+    const res = await fetch('/api/proof/upload', { method: 'POST', body: formData })
+    const data = await res.json()
+    setUploading(false)
+
+    if (data.error === 'already_posted_today') {
+      setCanPostProof(false)
+      if (data.next_allowed_at) setNextAllowedAt(data.next_allowed_at)
+      setProofToast('Already posted your Proof of the Day!')
+    } else if (data.success) {
+      setCanPostProof(false)
+      setNextAllowedAt(new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString())
+      setProofToast('Proof posted!')
+    } else {
+      setProofToast('Upload failed. Try again.')
+    }
+
+    setSelectedCategory(null)
+    if (proofFileInputRef.current) proofFileInputRef.current.value = ''
   }
 
   if (isPlus === false) return (
@@ -396,6 +558,10 @@ export default function ChatPage() {
           const specialty = isCoach ? COACH_SPECIALTIES[msg.user_id] : null
           const hasQuickReplies = isCoach && msg.quick_replies && msg.quick_replies.length > 0 && !usedQuickReplies.has(msg.id)
           const isLastCoachMsg = hasQuickReplies && !messages.slice(i + 1).some(m => COACH_IDS.has(m.user_id))
+          const isProofPhoto = msg.media_type === 'proof_photo'
+          const photoId = msg.payload?.photo_id
+          const category = msg.payload?.category
+          const hearts = photoId ? (heartState[photoId] || { count: 0, hearted: false }) : null
 
           return (
             <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
@@ -430,7 +596,57 @@ export default function ChatPage() {
                 </button>
               )}
 
-              {msg.media_url && (
+              {/* Proof Photo Render */}
+              {isProofPhoto && msg.media_url && (
+                <div style={{ maxWidth: '90%', width: '100%' }}>
+                  {/* Category badge */}
+                  {category && (
+                    <div className="mb-1.5 ml-0.5">
+                      <span
+                        className="text-xs px-2.5 py-1 rounded-full font-semibold"
+                        style={{
+                          background: `${CATEGORY_COLORS[category]}22`,
+                          color: CATEGORY_COLORS[category] || 'var(--accent)',
+                          border: `1px solid ${CATEGORY_COLORS[category]}55`,
+                        }}
+                      >
+                        {category}
+                      </span>
+                    </div>
+                  )}
+                  {/* Photo */}
+                  <div
+                    className="rounded-2xl overflow-hidden cursor-pointer"
+                    style={{ border: '1px solid var(--border)' }}
+                    onClick={() => setFullscreenPhoto(msg.media_url!)}
+                  >
+                    <img
+                      src={msg.media_url}
+                      alt={`Proof - ${category}`}
+                      style={{ width: '100%', maxHeight: 320, objectFit: 'cover', display: 'block' }}
+                    />
+                  </div>
+                  {/* Hearts */}
+                  {photoId && hearts && (
+                    <div className="flex items-center gap-2 mt-1.5 ml-1">
+                      <button
+                        onClick={() => toggleHeart(photoId)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 4 }}
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill={hearts.hearted ? '#f43f5e' : 'none'} stroke={hearts.hearted ? '#f43f5e' : 'var(--text-muted)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+                        </svg>
+                        <span className="text-xs font-medium" style={{ color: hearts.hearted ? '#f43f5e' : 'var(--text-muted)' }}>
+                          {hearts.count > 0 ? hearts.count : ''}
+                        </span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Regular media (admin uploads) */}
+              {!isProofPhoto && msg.media_url && (
                 <div className="max-w-[80%] mb-1">
                   <img src={msg.media_url} alt="shared media" style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: 12, display: 'block' }} />
                 </div>
@@ -506,6 +722,7 @@ export default function ChatPage() {
         <div ref={bottomRef} />
       </div>
 
+      {/* Profile modal */}
       {profileModal && (
         <div className="fixed inset-0 z-50 flex items-end justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={() => setProfileModal(null)}>
           <div className="card w-full max-w-sm p-5 animate-fade-in" onClick={e => e.stopPropagation()}>
@@ -554,9 +771,66 @@ export default function ChatPage() {
         </div>
       )}
 
+      {/* Category picker modal */}
+      {showCategoryPicker && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }} onClick={() => setShowCategoryPicker(false)}>
+          <div className="card w-full max-w-sm p-5 animate-fade-in" onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-bold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+              Proof of the Day
+            </h3>
+            <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>What are you posting proof of?</p>
+            <div className="grid grid-cols-2 gap-2">
+              {['Gym', 'Walk', 'Meal', 'Other'].map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => handleCategorySelect(cat)}
+                  className="py-3 px-4 rounded-xl font-semibold text-sm transition-all"
+                  style={{
+                    background: `${CATEGORY_COLORS[cat]}15`,
+                    color: CATEGORY_COLORS[cat],
+                    border: `1.5px solid ${CATEGORY_COLORS[cat]}40`,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {cat === 'Gym' ? '🏋️ Gym' : cat === 'Walk' ? '🚶 Walk' : cat === 'Meal' ? '🥗 Meal' : '📸 Other'}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fullscreen photo viewer */}
+      {fullscreenPhoto && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.92)' }}
+          onClick={() => setFullscreenPhoto(null)}
+        >
+          <button
+            onClick={() => setFullscreenPhoto(null)}
+            style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'white' }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+          <img
+            src={fullscreenPhoto}
+            alt="Proof"
+            style={{ maxWidth: '95vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 12 }}
+            onClick={e => e.stopPropagation()}
+          />
+        </div>
+      )}
+
       {blockedNotice && (
         <div className="mx-4 mb-2 px-3 py-2 rounded-xl text-xs text-center" style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--danger)' }}>
           Keep it in-app — links, socials, and contact info are not allowed here.
+        </div>
+      )}
+
+      {proofToast && (
+        <div className="mx-4 mb-2 px-3 py-2 rounded-xl text-xs text-center" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
+          {proofToast}
         </div>
       )}
 
@@ -568,6 +842,7 @@ export default function ChatPage() {
 
       <div className="flex-shrink-0 px-4 pb-4 pt-2 border-t" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
         <div className="flex items-center gap-2">
+          {/* Admin image upload (always active) */}
           {isAdmin && (
             <>
               <input ref={fileInputRef} type="file" accept="image/*,.gif" className="hidden" onChange={handleFileUpload} />
@@ -578,6 +853,32 @@ export default function ChatPage() {
               </button>
             </>
           )}
+
+          {/* Proof of the Day button for Plus+ non-admin */}
+          {!isAdmin && (
+            <>
+              <input ref={proofFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleProofFileSelect} />
+              <button
+                onClick={handleProofButtonClick}
+                disabled={uploading}
+                className="flex-shrink-0 p-2.5 rounded-xl"
+                title={canPostProof ? 'Post Proof of the Day' : 'Already posted today'}
+                style={{
+                  background: 'var(--bg-input)',
+                  color: canPostProof ? 'var(--accent)' : 'var(--text-muted)',
+                  opacity: canPostProof === null ? 0.5 : 1,
+                  transition: 'color 0.2s, opacity 0.2s',
+                  border: canPostProof ? '1px solid rgba(45,212,191,0.3)' : '1px solid transparent',
+                }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                  <circle cx="12" cy="13" r="4"/>
+                </svg>
+              </button>
+            </>
+          )}
+
           <input
             ref={inputRef}
             className="input-base flex-1"
