@@ -102,7 +102,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   ]
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden" style={{ background: 'var(--bg)' }}>
+    <div className="flex flex-col overflow-hidden" style={{ background: 'var(--bg)', height: '100dvh' }}>
       {/* Header — always visible, never scrolls away */}
       <header className="flex-shrink-0 z-40 flex items-center justify-between px-4 py-2 border-b" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
         <img
