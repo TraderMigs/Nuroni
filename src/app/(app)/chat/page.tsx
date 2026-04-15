@@ -54,6 +54,14 @@ const COACH_SPECIALTIES: Record<string, string> = {
   '00000000-0000-0000-0000-000000000005': 'Mindset & Motivation',
 }
 
+const COACH_NAMES: Record<string, string> = {
+  '00000000-0000-0000-0000-000000000001': 'Coach Maya',
+  '00000000-0000-0000-0000-000000000002': 'Coach Dex',
+  '00000000-0000-0000-0000-000000000003': 'Coach Riley',
+  '00000000-0000-0000-0000-000000000004': 'Coach Nova',
+  '00000000-0000-0000-0000-000000000005': 'Coach Blaze',
+}
+
 const CATEGORY_COLORS: Record<string, string> = {
   Gym: '#2dd4bf',
   Walk: '#60a5fa',
@@ -159,6 +167,9 @@ export default function ChatPage() {
     } catch { return new Set<string>() }
   })
   const [otherHint, setOtherHint] = useState<string | null>(null)
+  const [activeCoachId, setActiveCoachId] = useState<string | null>(null)
+  const [lastUserMsgAt, setLastUserMsgAt] = useState<number | null>(null)
+  const [showCoachKeepPrompt, setShowCoachKeepPrompt] = useState(false)
   const [heartState, setHeartState] = useState<HeartState>({})
   const [fullscreenPhoto, setFullscreenPhoto] = useState<string | null>(null)
 
@@ -310,6 +321,17 @@ export default function ChatPage() {
           const pid = extractPhotoId(newMsg)
           if (pid) setHeartState(prev => ({ ...prev, [pid]: { count: 0, hearted: false } }))
         }
+        // Set active coach when a coach replies — checked against userId via state setter
+        if (COACH_IDS.has(newMsg.user_id) && newMsg.reply_to_user_id) {
+          setUserId(currentId => {
+            if (newMsg.reply_to_user_id === currentId) {
+              setActiveCoachId(newMsg.user_id)
+              setLastUserMsgAt(Date.now())
+              setShowCoachKeepPrompt(false)
+            }
+            return currentId
+          })
+        }
       })
       .subscribe()
 
@@ -331,6 +353,30 @@ export default function ChatPage() {
   useEffect(() => {
     try { localStorage.setItem('nuroni-used-pills', JSON.stringify(Array.from(usedQuickReplies))) } catch {}
   }, [usedQuickReplies])
+
+  // 3-minute inactivity timer — show "Still chatting?" prompt
+  useEffect(() => {
+    if (!activeCoachId || !lastUserMsgAt) return
+    const THREE_MIN = 3 * 60 * 1000
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - lastUserMsgAt
+      if (elapsed >= THREE_MIN && !showCoachKeepPrompt) {
+        setShowCoachKeepPrompt(true)
+      }
+    }, 10000) // check every 10 seconds
+    return () => clearInterval(interval)
+  }, [activeCoachId, lastUserMsgAt, showCoachKeepPrompt])
+
+  // Auto-clear after 3 more minutes of no response to prompt
+  useEffect(() => {
+    if (!showCoachKeepPrompt) return
+    const t = setTimeout(() => {
+      setActiveCoachId(null)
+      setShowCoachKeepPrompt(false)
+      setLastUserMsgAt(null)
+    }, 3 * 60 * 1000)
+    return () => clearTimeout(t)
+  }, [showCoachKeepPrompt])
 
   function buildContext(currentMessages: Message[]): { role: string; content: string; coach_id?: string; had_quick_replies?: boolean }[] {
     return currentMessages.slice(-6).filter(m => m.content && !m.content.startsWith('proof_category:')).map(m => ({
@@ -404,6 +450,8 @@ export default function ChatPage() {
     setMessages(prev => [...prev, optimistic])
     if (!text) setInput('')
     setOtherHint(null)
+    setLastUserMsgAt(Date.now())
+    setShowCoachKeepPrompt(false)
     inputRef.current?.focus()
 
     setSending(true)
@@ -415,12 +463,14 @@ export default function ChatPage() {
       if (!text && !mediaUrl) setInput(content)
     } else if (data) {
       setMessages(prev => prev.map(m => m.id === tempId ? { ...data, ...profileCache[userId] } : m))
-      if (content) {
+      const isAtCoach = content.toLowerCase().startsWith('@coach')
+      const shouldFireCoach = isAtCoach || fromPill || !!activeCoachId
+      if (content && shouldFireCoach) {
         const context = buildContext(messages)
         fetch('/api/coach', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content, user_id: userId, context, from_pill: fromPill || false }),
+          body: JSON.stringify({ content, user_id: userId, context, from_pill: fromPill || false, active_coach_id: activeCoachId }),
         }).catch(() => {})
       }
     }
@@ -753,6 +803,38 @@ export default function ChatPage() {
       {canPostProof === false && countdown && (
         <div className="mx-4 mb-1 px-3 py-2 rounded-xl text-xs text-center" style={{ background: 'rgba(45,212,191,0.06)', color: 'var(--text-muted)', border: '1px solid rgba(45,212,191,0.15)' }}>
           Next Proof of the Day in <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{countdown}</span>
+        </div>
+      )}
+
+      {/* Still chatting with coach? prompt */}
+      {showCoachKeepPrompt && activeCoachId && (
+        <div className="mx-4 mb-1 px-3 py-2 rounded-xl flex items-center justify-between gap-3 animate-fade-in" style={{ background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.25)' }}>
+          <p className="text-xs" style={{ color: '#a78bfa' }}>
+            Still chatting with {COACH_NAMES[activeCoachId] || 'your coach'}?
+          </p>
+          <div className="flex gap-2 flex-shrink-0">
+            <button
+              onClick={() => {
+                setShowCoachKeepPrompt(false)
+                setLastUserMsgAt(Date.now())
+              }}
+              className="text-xs px-2.5 py-1 rounded-lg font-semibold"
+              style={{ background: 'rgba(167,139,250,0.2)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.35)', cursor: 'pointer' }}
+            >
+              Yes
+            </button>
+            <button
+              onClick={() => {
+                setActiveCoachId(null)
+                setShowCoachKeepPrompt(false)
+                setLastUserMsgAt(null)
+              }}
+              className="text-xs px-2.5 py-1 rounded-lg font-semibold"
+              style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border)', cursor: 'pointer' }}
+            >
+              No
+            </button>
+          </div>
         </div>
       )}
 
