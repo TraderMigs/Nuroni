@@ -30,4 +30,3 @@ Push to GitHub → Vercel auto-deploys.
 - PWA ready
 .
 trigger deploy
-.
