@@ -40,6 +40,7 @@ export default function ProfilePage() {
   const [toast, setToast] = useState('')
   const [userId, setUserId] = useState('')
   const [isPlus, setIsPlus] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
   const [proofPhotosPublic, setProofPhotosPublic] = useState(true)
 
   // Proof photos state
@@ -67,6 +68,7 @@ export default function ProfilePage() {
     const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
     if (p) {
       setIsPlus(p.is_plus || false)
+      setIsAdmin(p.is_admin || false)
       setProofPhotosPublic(p.proof_photos_public ?? true)
       setForm({
         display_name: p.display_name || '',
@@ -157,9 +159,11 @@ export default function ProfilePage() {
             <p className="text-sm font-bold" style={{ color: 'var(--accent)', fontFamily: 'var(--font-display)' }}>✦ Plus+ Active</p>
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>All features unlocked</p>
           </div>
-          <button onClick={handlePortal} disabled={portalLoading} className="btn-secondary py-1.5 px-3 text-xs">
-            {portalLoading ? '…' : 'Manage'}
-          </button>
+          {!isAdmin && (
+            <button onClick={handlePortal} disabled={portalLoading} className="btn-secondary py-1.5 px-3 text-xs">
+              {portalLoading ? '…' : 'Manage'}
+            </button>
+          )}
         </div>
       ) : (
         <button onClick={() => router.push('/plus')} className="card p-4 mb-4 w-full text-left flex items-center justify-between" style={{ cursor: 'pointer', border: '1px dashed var(--border)' }}>
