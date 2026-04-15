@@ -97,8 +97,9 @@ function useCountdown(targetIso: string | null): string {
   const [display, setDisplay] = useState('')
   useEffect(() => {
     if (!targetIso) { setDisplay(''); return }
+    const iso = targetIso
     function update() {
-      const ms = new Date(targetIso).getTime() - Date.now()
+      const ms = new Date(iso).getTime() - Date.now()
       if (ms <= 0) { setDisplay(''); return }
       const h = Math.floor(ms / 3600000)
       const m = Math.floor((ms % 3600000) / 60000)
