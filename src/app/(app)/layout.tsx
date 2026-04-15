@@ -102,8 +102,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   ]
 
   return (
-    <div className="min-h-screen flex flex-col overflow-x-hidden" style={{ background: 'var(--bg)' }}>
-      <header className="sticky top-0 z-40 flex items-center justify-between px-4 py-2 border-b" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: 'var(--bg)' }}>
+      {/* Header — always visible, never scrolls away */}
+      <header className="flex-shrink-0 z-40 flex items-center justify-between px-4 py-2 border-b" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
         <img
           src="/logo.png"
           alt="Nuroni"
@@ -117,7 +118,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               className="text-xs font-bold px-2.5 py-1 rounded-lg flex-shrink-0"
               style={{ background: 'var(--accent)', color: '#0D1117', textDecoration: 'none' }}
             >
-              ✦ Plus+
+              Plus+
             </Link>
           )}
           {isAdmin && (
@@ -144,12 +145,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <main className="flex-1 pb-24 page-enter w-full overflow-x-hidden">
+      {/* Scrollable content area */}
+      <main className="flex-1 overflow-y-auto overflow-x-hidden page-enter w-full pb-20">
         {children}
       </main>
 
-      {/* Bottom nav — Link prefetch for instant switching */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+      {/* Bottom nav — always visible */}
+      <nav className="flex-shrink-0 z-40 border-t" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
         <div className="flex items-center justify-evenly mx-auto py-2" style={{ maxWidth: '480px' }}>
           {navItems.map(item => (
             <Link
