@@ -57,7 +57,7 @@ export default async function PublicProfilePage({ params }: { params: { username
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id, display_name, username, start_weight, weight_unit, diet_type, diet_custom, is_public')
+    .select('id, display_name, username, start_weight, weight_unit, diet_type, diet_custom, is_public, proof_photos_public')
     .eq('username', params.username.toLowerCase())
     .maybeSingle()
 
@@ -91,11 +91,22 @@ export default async function PublicProfilePage({ params }: { params: { username
     .order('created_at', { ascending: false })
     .limit(14)
 
-  // Follow count
   const { count: followerCount } = await supabase
     .from('follows')
     .select('*', { count: 'exact', head: true })
     .eq('following_id', profile.id)
+
+  // Proof photos (only if public)
+  const showProofGrid = profile.proof_photos_public !== false
+  let proofPhotos: { id: string; photo_url: string; category: string; created_at: string }[] = []
+  if (showProofGrid) {
+    const { data: photos } = await supabase
+      .from('proof_photos')
+      .select('id, photo_url, category, created_at')
+      .eq('user_id', profile.id)
+      .order('created_at', { ascending: false })
+    proofPhotos = photos || []
+  }
 
   const currentWeight = entries && entries[0] ? entries[0].weight : profile.start_weight
   const unit = profile.weight_unit
@@ -128,7 +139,6 @@ export default async function PublicProfilePage({ params }: { params: { username
               {followerCount ? ` · ${followerCount} follower${followerCount !== 1 ? 's' : ''}` : ''}
             </p>
           </div>
-          {/* Follow button — client component */}
           <FollowButton profileId={profile.id} />
         </div>
 
@@ -181,6 +191,11 @@ export default async function PublicProfilePage({ params }: { params: { username
           </div>
         )}
 
+        {/* Proof of the Day grid — collapsible, collapsed by default */}
+        {showProofGrid && (
+          <ProofGrid photos={proofPhotos} />
+        )}
+
         {/* CTA */}
         <div className="card p-5 text-center">
           <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>Ready to track your own journey?</p>
@@ -196,5 +211,5 @@ export default async function PublicProfilePage({ params }: { params: { username
   )
 }
 
-// Client component for follow button
 import FollowButton from './FollowButton'
+import ProofGrid from './ProofGrid'
