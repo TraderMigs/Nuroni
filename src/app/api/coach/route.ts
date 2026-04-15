@@ -11,7 +11,7 @@ const COACH_IDS = new Set([
 
 export async function POST(req: NextRequest) {
   try {
-    const { content, user_id, context, from_pill } = await req.json()
+    const { content, user_id, context, from_pill, active_coach_id } = await req.json()
     if (!content || !user_id) return NextResponse.json({ ok: true })
 
     const isAtCoach = content.toLowerCase().startsWith('@coach')
@@ -19,14 +19,14 @@ export async function POST(req: NextRequest) {
       ? content.replace(/^@coach\s*/i, '').trim()
       : content
 
-    // Only fire if @coach prefix OR pill tap
-    if (!isAtCoach && !from_pill) {
+    // Fire if @coach prefix, pill tap, or active coach conversation
+    if (!isAtCoach && !from_pill && !active_coach_id) {
       return NextResponse.json({ ok: true })
     }
 
-    if (!strippedContent && !from_pill) return NextResponse.json({ ok: true })
+    if (!strippedContent && !from_pill && !active_coach_id) return NextResponse.json({ ok: true })
 
-    // Find last coach who asked a question — conversation ownership lock
+    // Locked coach priority: pill > active coach session > keyword match
     let lockedCoachId: string | null = null
     if (from_pill && context && context.length > 0) {
       for (let i = context.length - 1; i >= 0; i--) {
@@ -36,6 +36,10 @@ export async function POST(req: NextRequest) {
           break
         }
       }
+    }
+    // Use active coach session if no pill lock
+    if (!lockedCoachId && active_coach_id && COACH_IDS.has(active_coach_id)) {
+      lockedCoachId = active_coach_id
     }
 
     // Use waitUntil so fetch keeps running after response is sent
