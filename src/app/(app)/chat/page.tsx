@@ -80,6 +80,38 @@ function formatTime(ts: string): string {
   return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
+// Extract category from message — payload first, fallback to content prefix
+function extractProofCategory(msg: Message): string | null {
+  if (msg.payload?.category) return msg.payload.category
+  if (msg.content?.startsWith('proof_category:')) return msg.content.replace('proof_category:', '').trim()
+  return null
+}
+
+// Extract photo_id from message
+function extractPhotoId(msg: Message): string | null {
+  if (msg.payload?.photo_id) return msg.payload.photo_id
+  return null
+}
+
+function useCountdown(targetIso: string | null): string {
+  const [display, setDisplay] = useState('')
+  useEffect(() => {
+    if (!targetIso) { setDisplay(''); return }
+    function update() {
+      const ms = new Date(targetIso).getTime() - Date.now()
+      if (ms <= 0) { setDisplay(''); return }
+      const h = Math.floor(ms / 3600000)
+      const m = Math.floor((ms % 3600000) / 60000)
+      const s = Math.floor((ms % 60000) / 1000)
+      setDisplay(`${h}h ${m}m ${s}s`)
+    }
+    update()
+    const t = setInterval(update, 1000)
+    return () => clearInterval(t)
+  }, [targetIso])
+  return display
+}
+
 function MessageContent({ content, isAdmin, isMe }: { content: string; isAdmin: boolean; isMe: boolean }) {
   if (!isAdmin || !content) return <span>{content}</span>
   const urlRegex = /(https?:\/\/[^\s]+|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|www\.[^\s]+)/g
@@ -119,6 +151,7 @@ export default function ChatPage() {
   const [profileModal, setProfileModal] = useState<ProfileModal | null>(null)
   const [followLoading, setFollowLoading] = useState(false)
   const [showTip, setShowTip] = useState(false)
+  const [showCoachTip, setShowCoachTip] = useState(false)
   const [usedQuickReplies, setUsedQuickReplies] = useState<Set<string>>(new Set())
   const [heartState, setHeartState] = useState<HeartState>({})
   const [fullscreenPhoto, setFullscreenPhoto] = useState<string | null>(null)
@@ -129,6 +162,8 @@ export default function ChatPage() {
   const [showCategoryPicker, setShowCategoryPicker] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [proofToast, setProofToast] = useState('')
+
+  const countdown = useCountdown(canPostProof === false ? nextAllowedAt : null)
 
   const fetchProfiles = useCallback(async (userIds: string[]) => {
     const { data: profiles } = await supabase
@@ -160,22 +195,12 @@ export default function ChatPage() {
     return result
   }, [supabase])
 
-  async function checkProofStatus() {
-    const res = await fetch('/api/proof/upload')
-    if (res.ok) {
-      const data = await res.json()
-      setCanPostProof(data.can_post)
-      setNextAllowedAt(data.next_allowed_at || null)
-    }
-  }
-
-  async function loadHeartStates(msgs: Message[]) {
-    const proofMsgs = msgs.filter(m => m.media_type === 'proof_photo' && m.payload?.photo_id)
+  async function loadHeartStates(msgs: Message[], currentUserId: string) {
+    const proofMsgs = msgs.filter(m => m.media_type === 'proof_photo')
     if (proofMsgs.length === 0) return
+    const photoIds = proofMsgs.map(m => extractPhotoId(m)).filter(Boolean) as string[]
+    if (photoIds.length === 0) return
 
-    const photoIds = proofMsgs.map(m => m.payload!.photo_id!)
-
-    // Get heart counts
     const { data: hearts } = await supabase
       .from('proof_hearts')
       .select('photo_id, user_id')
@@ -183,10 +208,9 @@ export default function ChatPage() {
 
     const counts: Record<string, number> = {}
     const myHearts = new Set<string>()
-
     hearts?.forEach(h => {
       counts[h.photo_id] = (counts[h.photo_id] || 0) + 1
-      if (h.user_id === userId) myHearts.add(h.photo_id)
+      if (h.user_id === currentUserId) myHearts.add(h.photo_id)
     })
 
     const newState: HeartState = {}
@@ -214,17 +238,15 @@ export default function ChatPage() {
       const tipSeen = localStorage.getItem('nuroni-chat-tip')
       if (!tipSeen) setShowTip(true)
 
+      const coachTipSeen = localStorage.getItem('nuroni-coach-tip')
+      if (!coachTipSeen) setShowCoachTip(true)
+
       const { data: follows } = await supabase
-        .from('follows')
-        .select('following_id')
-        .eq('follower_id', user.id)
+        .from('follows').select('following_id').eq('follower_id', user.id)
       setFollowedIds(new Set(Array.from(follows?.map(f => f.following_id) || [])))
 
       const { data: msgs } = await supabase
-        .from('messages')
-        .select('*')
-        .order('created_at', { ascending: true })
-        .limit(50)
+        .from('messages').select('*').order('created_at', { ascending: true }).limit(50)
 
       const initialMsgs = msgs || []
       setMessages(initialMsgs)
@@ -235,18 +257,14 @@ export default function ChatPage() {
           setProfileCache(cache)
           setMessages(prev => prev.map(m => ({ ...m, ...cache[m.user_id] })))
         })
-        // Load heart states after userId is known
-        setTimeout(() => loadHeartStates(initialMsgs), 200)
+        setTimeout(() => loadHeartStates(initialMsgs, user.id), 200)
       }
 
       // Check proof status
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
       const { data: recent } = await supabase
-        .from('proof_photos')
-        .select('id, created_at')
-        .eq('user_id', user.id)
-        .gte('created_at', twentyFourHoursAgo)
-        .limit(1)
+        .from('proof_photos').select('id, created_at').eq('user_id', user.id)
+        .gte('created_at', twentyFourHoursAgo).limit(1)
 
       if (recent && recent.length > 0) {
         setCanPostProof(false)
@@ -276,12 +294,9 @@ export default function ChatPage() {
             })
             return cache
           })
-          // Load heart state for new proof photos
-          if (newMsg.media_type === 'proof_photo' && newMsg.payload?.photo_id) {
-            setHeartState(prev => ({
-              ...prev,
-              [newMsg.payload!.photo_id!]: { count: 0, hearted: false },
-            }))
+          if (newMsg.media_type === 'proof_photo') {
+            const pid = extractPhotoId(newMsg)
+            if (pid) setHeartState(prev => ({ ...prev, [pid]: { count: 0, hearted: false } }))
           }
         })
         .subscribe()
@@ -298,42 +313,26 @@ export default function ChatPage() {
   }, [messages.length])
 
   useEffect(() => {
-    if (showTip) {
-      const t = setTimeout(dismissTip, 6000)
-      return () => clearTimeout(t)
-    }
+    if (showTip) { const t = setTimeout(dismissTip, 6000); return () => clearTimeout(t) }
   }, [showTip])
 
   useEffect(() => {
-    if (proofToast) {
-      const t = setTimeout(() => setProofToast(''), 3000)
-      return () => clearTimeout(t)
-    }
+    if (proofToast) { const t = setTimeout(() => setProofToast(''), 3000); return () => clearTimeout(t) }
   }, [proofToast])
 
   function buildContext(currentMessages: Message[]): { role: string; content: string; coach_id?: string; had_quick_replies?: boolean }[] {
-    return currentMessages
-      .slice(-6)
-      .filter(m => m.content)
-      .map(m => ({
-        role: COACH_IDS.has(m.user_id) ? 'assistant' : 'user',
-        content: m.content,
-        coach_id: COACH_IDS.has(m.user_id) ? m.user_id : undefined,
-        had_quick_replies: !!(m.quick_replies && m.quick_replies.length > 0),
-      }))
+    return currentMessages.slice(-6).filter(m => m.content && !m.content.startsWith('proof_category:')).map(m => ({
+      role: COACH_IDS.has(m.user_id) ? 'assistant' : 'user',
+      content: m.content,
+      coach_id: COACH_IDS.has(m.user_id) ? m.user_id : undefined,
+      had_quick_replies: !!(m.quick_replies && m.quick_replies.length > 0),
+    }))
   }
 
   async function openProfile(msg: Message) {
     if (!msg.username || msg.is_coach || COACH_IDS.has(msg.user_id)) return
-    const { data: goal } = await supabase
-      .from('goals')
-      .select('goal_weight')
-      .eq('user_id', msg.user_id)
-      .maybeSingle()
-    const { count } = await supabase
-      .from('follows')
-      .select('*', { count: 'exact', head: true })
-      .eq('following_id', msg.user_id)
+    const { data: goal } = await supabase.from('goals').select('goal_weight').eq('user_id', msg.user_id).maybeSingle()
+    const { count } = await supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', msg.user_id)
     setProfileModal({
       user_id: msg.user_id,
       display_name: msg.display_name || msg.username || 'Member',
@@ -361,29 +360,17 @@ export default function ChatPage() {
     setFollowLoading(false)
   }
 
-  function dismissTip() {
-    setShowTip(false)
-    localStorage.setItem('nuroni-chat-tip', '1')
-  }
+  function dismissTip() { setShowTip(false); localStorage.setItem('nuroni-chat-tip', '1') }
+  function dismissCoachTip() { setShowCoachTip(false); localStorage.setItem('nuroni-coach-tip', '1') }
 
   async function toggleHeart(photoId: string) {
     if (!userId) return
     const current = heartState[photoId] || { count: 0, hearted: false }
-
     if (current.hearted) {
-      // Optimistic remove
-      setHeartState(prev => ({
-        ...prev,
-        [photoId]: { count: Math.max(0, prev[photoId]?.count - 1), hearted: false },
-      }))
-      await supabase.from('proof_hearts').delete()
-        .eq('photo_id', photoId).eq('user_id', userId)
+      setHeartState(prev => ({ ...prev, [photoId]: { count: Math.max(0, prev[photoId]?.count - 1), hearted: false } }))
+      await supabase.from('proof_hearts').delete().eq('photo_id', photoId).eq('user_id', userId)
     } else {
-      // Optimistic add
-      setHeartState(prev => ({
-        ...prev,
-        [photoId]: { count: (prev[photoId]?.count || 0) + 1, hearted: true },
-      }))
+      setHeartState(prev => ({ ...prev, [photoId]: { count: (prev[photoId]?.count || 0) + 1, hearted: true } }))
       await supabase.from('proof_hearts').insert({ photo_id: photoId, user_id: userId })
     }
   }
@@ -453,13 +440,8 @@ export default function ChatPage() {
 
   function handleProofButtonClick() {
     if (!canPostProof) {
-      if (nextAllowedAt) {
-        const next = new Date(nextAllowedAt)
-        const hours = Math.ceil((next.getTime() - Date.now()) / (1000 * 60 * 60))
-        setProofToast(`Next Proof of the Day available in ~${hours}h`)
-      } else {
-        setProofToast('Already posted your Proof of the Day!')
-      }
+      if (countdown) setProofToast(`Next Proof available in ${countdown}`)
+      else setProofToast('Already posted your Proof of the Day!')
       return
     }
     setShowCategoryPicker(true)
@@ -526,15 +508,23 @@ export default function ChatPage() {
         <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: 'var(--accent)', color: '#0D1117' }}>Live</span>
       </div>
 
+      {/* Tip: tap names */}
       {showTip && (
-        <div
-          className="mx-4 mt-2 px-4 py-3 rounded-xl flex items-center justify-between gap-3 animate-fade-in"
-          style={{ background: 'var(--accent-subtle)', border: '1px solid rgba(45,212,191,0.3)' }}
-        >
-          <p className="text-xs" style={{ color: 'var(--accent-text)', lineHeight: 1.5 }}>
-            Tap any name to check their stats and follow their journey.
-          </p>
+        <div className="mx-4 mt-2 px-4 py-3 rounded-xl flex items-center justify-between gap-3 animate-fade-in" style={{ background: 'var(--accent-subtle)', border: '1px solid rgba(45,212,191,0.3)' }}>
+          <p className="text-xs" style={{ color: 'var(--accent-text)', lineHeight: 1.5 }}>Tap any name to check their stats and follow their journey.</p>
           <button onClick={dismissTip} style={{ color: 'var(--accent-text)', flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      )}
+
+      {/* Tip: @coach */}
+      {!showTip && showCoachTip && (
+        <div className="mx-4 mt-2 px-4 py-3 rounded-xl flex items-center justify-between gap-3 animate-fade-in" style={{ background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.25)' }}>
+          <p className="text-xs" style={{ color: '#a78bfa', lineHeight: 1.5 }}>
+            Type <strong>@coach</strong> before your message to get a reply from one of our AI fitness coaches.
+          </p>
+          <button onClick={dismissCoachTip} style={{ color: '#a78bfa', flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer' }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
@@ -559,8 +549,8 @@ export default function ChatPage() {
           const hasQuickReplies = isCoach && msg.quick_replies && msg.quick_replies.length > 0 && !usedQuickReplies.has(msg.id)
           const isLastCoachMsg = hasQuickReplies && !messages.slice(i + 1).some(m => COACH_IDS.has(m.user_id))
           const isProofPhoto = msg.media_type === 'proof_photo'
-          const photoId = msg.payload?.photo_id
-          const category = msg.payload?.category
+          const photoId = extractPhotoId(msg)
+          const category = extractProofCategory(msg)
           const hearts = photoId ? (heartState[photoId] || { count: 0, hearted: false }) : null
 
           return (
@@ -575,109 +565,65 @@ export default function ChatPage() {
                     {msg.display_name || msg.username || 'Member'}
                   </span>
                   {isCoach && (
-                    <span className="text-xs px-1.5 py-0.5 rounded-full font-bold" style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa', fontSize: '9px', border: '1px solid rgba(167,139,250,0.3)' }}>
-                      AI COACH
-                    </span>
+                    <span className="text-xs px-1.5 py-0.5 rounded-full font-bold" style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa', fontSize: '9px', border: '1px solid rgba(167,139,250,0.3)' }}>AI COACH</span>
                   )}
                   {isCoach && specialty && (
-                    <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(167,139,250,0.08)', color: 'rgba(167,139,250,0.7)', fontSize: '9px', border: '1px solid rgba(167,139,250,0.15)' }}>
-                      {specialty}
-                    </span>
+                    <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(167,139,250,0.08)', color: 'rgba(167,139,250,0.7)', fontSize: '9px', border: '1px solid rgba(167,139,250,0.15)' }}>{specialty}</span>
                   )}
                   {!isCoach && isFollowed && <span className="ml-1">⭐</span>}
                   {!isCoach && msg.is_admin && (
                     <span className="ml-1 text-xs px-1 rounded" style={{ background: 'var(--accent)', color: '#0D1117', fontSize: '9px' }}>ADMIN</span>
                   )}
                   {!isCoach && lostSoFar !== null && lostSoFar > 0 && (
-                    <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
-                      -{lostSoFar} {msg.weight_unit || 'lbs'}
-                    </span>
+                    <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>-{lostSoFar} {msg.weight_unit || 'lbs'}</span>
                   )}
                 </button>
               )}
 
-              {/* Proof Photo Render */}
+              {/* Proof Photo */}
               {isProofPhoto && msg.media_url && (
                 <div style={{ maxWidth: '90%', width: '100%' }}>
-                  {/* Category badge */}
                   {category && (
                     <div className="mb-1.5 ml-0.5">
-                      <span
-                        className="text-xs px-2.5 py-1 rounded-full font-semibold"
-                        style={{
-                          background: `${CATEGORY_COLORS[category]}22`,
-                          color: CATEGORY_COLORS[category] || 'var(--accent)',
-                          border: `1px solid ${CATEGORY_COLORS[category]}55`,
-                        }}
-                      >
+                      <span className="text-xs px-2.5 py-1 rounded-full font-semibold" style={{ background: `${CATEGORY_COLORS[category] || '#888'}22`, color: CATEGORY_COLORS[category] || 'var(--accent)', border: `1px solid ${CATEGORY_COLORS[category] || '#888'}55` }}>
                         {category}
                       </span>
                     </div>
                   )}
-                  {/* Photo */}
-                  <div
-                    className="rounded-2xl overflow-hidden cursor-pointer"
-                    style={{ border: '1px solid var(--border)' }}
-                    onClick={() => setFullscreenPhoto(msg.media_url!)}
-                  >
-                    <img
-                      src={msg.media_url}
-                      alt={`Proof - ${category}`}
-                      style={{ width: '100%', maxHeight: 320, objectFit: 'cover', display: 'block' }}
-                    />
+                  <div className="rounded-2xl overflow-hidden cursor-pointer" style={{ border: '1px solid var(--border)' }} onClick={() => setFullscreenPhoto(msg.media_url!)}>
+                    <img src={msg.media_url} alt={`Proof - ${category || ''}`} style={{ width: '100%', maxHeight: 320, objectFit: 'cover', display: 'block' }} />
                   </div>
-                  {/* Hearts */}
                   {photoId && hearts && (
                     <div className="flex items-center gap-2 mt-1.5 ml-1">
-                      <button
-                        onClick={() => toggleHeart(photoId)}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 4 }}
-                      >
+                      <button onClick={() => toggleHeart(photoId)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
                         <svg width="18" height="18" viewBox="0 0 24 24" fill={hearts.hearted ? '#f43f5e' : 'none'} stroke={hearts.hearted ? '#f43f5e' : 'var(--text-muted)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
                         </svg>
-                        <span className="text-xs font-medium" style={{ color: hearts.hearted ? '#f43f5e' : 'var(--text-muted)' }}>
-                          {hearts.count > 0 ? hearts.count : ''}
-                        </span>
+                        <span className="text-xs font-medium" style={{ color: hearts.hearted ? '#f43f5e' : 'var(--text-muted)' }}>{hearts.count > 0 ? hearts.count : ''}</span>
                       </button>
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Regular media (admin uploads) */}
+              {/* Regular admin media */}
               {!isProofPhoto && msg.media_url && (
                 <div className="max-w-[80%] mb-1">
                   <img src={msg.media_url} alt="shared media" style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: 12, display: 'block' }} />
                 </div>
               )}
 
-              {msg.content && (
-                <div
-                  className="max-w-[80%] px-3 py-2 rounded-2xl text-sm"
-                  style={{
-                    background: isMe
-                      ? 'var(--accent)'
-                      : isCoach
-                      ? 'rgba(167,139,250,0.08)'
-                      : isFollowed
-                      ? 'rgba(45,212,191,0.08)'
-                      : 'var(--bg-card)',
-                    color: isMe ? '#0D1117' : 'var(--text-primary)',
-                    border: isMe
-                      ? 'none'
-                      : isCoach
-                      ? '1px solid rgba(167,139,250,0.25)'
-                      : isFollowed
-                      ? '1px solid rgba(45,212,191,0.3)'
-                      : '1px solid var(--border)',
-                    borderBottomRightRadius: isMe ? 4 : undefined,
-                    borderBottomLeftRadius: !isMe ? 4 : undefined,
-                    opacity: msg.id.startsWith('temp-') ? 0.7 : 1,
-                    transition: 'opacity 0.2s',
-                    wordBreak: 'break-word',
-                  }}
-                >
+              {msg.content && !msg.content.startsWith('proof_category:') && (
+                <div className="max-w-[80%] px-3 py-2 rounded-2xl text-sm" style={{
+                  background: isMe ? 'var(--accent)' : isCoach ? 'rgba(167,139,250,0.08)' : isFollowed ? 'rgba(45,212,191,0.08)' : 'var(--bg-card)',
+                  color: isMe ? '#0D1117' : 'var(--text-primary)',
+                  border: isMe ? 'none' : isCoach ? '1px solid rgba(167,139,250,0.25)' : isFollowed ? '1px solid rgba(45,212,191,0.3)' : '1px solid var(--border)',
+                  borderBottomRightRadius: isMe ? 4 : undefined,
+                  borderBottomLeftRadius: !isMe ? 4 : undefined,
+                  opacity: msg.id.startsWith('temp-') ? 0.7 : 1,
+                  transition: 'opacity 0.2s',
+                  wordBreak: 'break-word',
+                }}>
                   <MessageContent content={msg.content} isAdmin={!!(msg.is_admin || isMe)} isMe={isMe} />
                 </div>
               )}
@@ -685,31 +631,11 @@ export default function ChatPage() {
               {isLastCoachMsg && (
                 <div className="flex flex-wrap gap-1.5 mt-2 max-w-[85%]">
                   {msg.quick_replies!.map((reply, ri) => (
-                    <button
-                      key={ri}
-                      onClick={() => handleQuickReply(msg.id, reply)}
-                      disabled={sending}
-                      className="text-xs px-3 py-1.5 rounded-full font-medium transition-all"
-                      style={{
-                        background: 'rgba(167,139,250,0.1)',
-                        color: '#a78bfa',
-                        border: '1px solid rgba(167,139,250,0.35)',
-                        cursor: 'pointer',
-                      }}
-                    >
+                    <button key={ri} onClick={() => handleQuickReply(msg.id, reply)} disabled={sending} className="text-xs px-3 py-1.5 rounded-full font-medium transition-all" style={{ background: 'rgba(167,139,250,0.1)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.35)', cursor: 'pointer' }}>
                       {reply}
                     </button>
                   ))}
-                  <button
-                    onClick={() => setUsedQuickReplies(prev => new Set(Array.from(prev).concat(msg.id)))}
-                    className="text-xs px-3 py-1.5 rounded-full font-medium transition-all"
-                    style={{
-                      background: 'var(--bg-input)',
-                      color: 'var(--text-muted)',
-                      border: '1px solid var(--border)',
-                      cursor: 'pointer',
-                    }}
-                  >
+                  <button onClick={() => setUsedQuickReplies(prev => new Set(Array.from(prev).concat(msg.id)))} className="text-xs px-3 py-1.5 rounded-full font-medium transition-all" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border)', cursor: 'pointer' }}>
                     Other...
                   </button>
                 </div>
@@ -728,70 +654,35 @@ export default function ChatPage() {
           <div className="card w-full max-w-sm p-5 animate-fade-in" onClick={e => e.stopPropagation()}>
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h3 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-                  {profileModal.display_name}
-                </h3>
-                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  @{profileModal.username} · {profileModal.follower_count} follower{profileModal.follower_count !== 1 ? 's' : ''}
-                </p>
+                <h3 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{profileModal.display_name}</h3>
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>@{profileModal.username} · {profileModal.follower_count} follower{profileModal.follower_count !== 1 ? 's' : ''}</p>
               </div>
-              <button
-                onClick={() => toggleFollow(profileModal.user_id)}
-                disabled={followLoading || profileModal.user_id === userId}
-                className={followedIds.has(profileModal.user_id) ? 'btn-secondary py-2 px-3 text-sm gap-1.5' : 'btn-primary py-2 px-3 text-sm gap-1.5'}
-              >
+              <button onClick={() => toggleFollow(profileModal.user_id)} disabled={followLoading || profileModal.user_id === userId} className={followedIds.has(profileModal.user_id) ? 'btn-secondary py-2 px-3 text-sm gap-1.5' : 'btn-primary py-2 px-3 text-sm gap-1.5'}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill={followedIds.has(profileModal.user_id) ? 'var(--accent)' : 'currentColor'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
                 </svg>
                 {followedIds.has(profileModal.user_id) ? 'Following' : 'Follow'}
               </button>
             </div>
-
             <div className="grid grid-cols-3 gap-2 mb-4">
-              <div className="stat-card text-center p-3">
-                <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{profileModal.current_weight}</div>
-                <div className="stat-label">{profileModal.weight_unit} now</div>
-              </div>
-              <div className="stat-card text-center p-3">
-                <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--success)' }}>
-                  {profileModal.start_weight - profileModal.current_weight > 0 ? `-${parseFloat((profileModal.start_weight - profileModal.current_weight).toFixed(1))}` : '0'}
-                </div>
-                <div className="stat-label">lost</div>
-              </div>
-              <div className="stat-card text-center p-3">
-                <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{profileModal.goal_weight || '-'}</div>
-                <div className="stat-label">goal</div>
-              </div>
+              <div className="stat-card text-center p-3"><div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{profileModal.current_weight}</div><div className="stat-label">{profileModal.weight_unit} now</div></div>
+              <div className="stat-card text-center p-3"><div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--success)' }}>{profileModal.start_weight - profileModal.current_weight > 0 ? `-${parseFloat((profileModal.start_weight - profileModal.current_weight).toFixed(1))}` : '0'}</div><div className="stat-label">lost</div></div>
+              <div className="stat-card text-center p-3"><div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{profileModal.goal_weight || '-'}</div><div className="stat-label">goal</div></div>
             </div>
-
-            <a href={`/u/${profileModal.username}`} target="_blank" rel="noopener noreferrer" className="btn-secondary w-full text-sm" style={{ display: 'flex', textDecoration: 'none' }}>
-              View full profile
-            </a>
+            <a href={`/u/${profileModal.username}`} target="_blank" rel="noopener noreferrer" className="btn-secondary w-full text-sm" style={{ display: 'flex', textDecoration: 'none' }}>View full profile</a>
           </div>
         </div>
       )}
 
-      {/* Category picker modal */}
+      {/* Category picker */}
       {showCategoryPicker && (
         <div className="fixed inset-0 z-50 flex items-end justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }} onClick={() => setShowCategoryPicker(false)}>
           <div className="card w-full max-w-sm p-5 animate-fade-in" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-bold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-              Proof of the Day
-            </h3>
+            <h3 className="text-base font-bold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Proof of the Day</h3>
             <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>What are you posting proof of?</p>
             <div className="grid grid-cols-2 gap-2">
               {['Gym', 'Walk', 'Meal', 'Other'].map(cat => (
-                <button
-                  key={cat}
-                  onClick={() => handleCategorySelect(cat)}
-                  className="py-3 px-4 rounded-xl font-semibold text-sm transition-all"
-                  style={{
-                    background: `${CATEGORY_COLORS[cat]}15`,
-                    color: CATEGORY_COLORS[cat],
-                    border: `1.5px solid ${CATEGORY_COLORS[cat]}40`,
-                    cursor: 'pointer',
-                  }}
-                >
+                <button key={cat} onClick={() => handleCategorySelect(cat)} className="py-3 px-4 rounded-xl font-semibold text-sm transition-all" style={{ background: `${CATEGORY_COLORS[cat]}15`, color: CATEGORY_COLORS[cat], border: `1.5px solid ${CATEGORY_COLORS[cat]}40`, cursor: 'pointer' }}>
                   {cat === 'Gym' ? '🏋️ Gym' : cat === 'Walk' ? '🚶 Walk' : cat === 'Meal' ? '🥗 Meal' : '📸 Other'}
                 </button>
               ))}
@@ -800,25 +691,13 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Fullscreen photo viewer */}
+      {/* Fullscreen photo */}
       {fullscreenPhoto && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,0.92)' }}
-          onClick={() => setFullscreenPhoto(null)}
-        >
-          <button
-            onClick={() => setFullscreenPhoto(null)}
-            style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'white' }}
-          >
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.92)' }} onClick={() => setFullscreenPhoto(null)}>
+          <button onClick={() => setFullscreenPhoto(null)} style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'white' }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
-          <img
-            src={fullscreenPhoto}
-            alt="Proof"
-            style={{ maxWidth: '95vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 12 }}
-            onClick={e => e.stopPropagation()}
-          />
+          <img src={fullscreenPhoto} alt="Proof" style={{ maxWidth: '95vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 12 }} onClick={e => e.stopPropagation()} />
         </div>
       )}
 
@@ -840,9 +719,15 @@ export default function ChatPage() {
         </div>
       )}
 
+      {/* Countdown bar — shown when user can't post yet */}
+      {!isAdmin && canPostProof === false && countdown && (
+        <div className="mx-4 mb-1 px-3 py-2 rounded-xl text-xs text-center" style={{ background: 'rgba(45,212,191,0.06)', color: 'var(--text-muted)', border: '1px solid rgba(45,212,191,0.15)' }}>
+          Next Proof of the Day in <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{countdown}</span>
+        </div>
+      )}
+
       <div className="flex-shrink-0 px-4 pb-4 pt-2 border-t" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
         <div className="flex items-center gap-2">
-          {/* Admin image upload (always active) */}
           {isAdmin && (
             <>
               <input ref={fileInputRef} type="file" accept="image/*,.gif" className="hidden" onChange={handleFileUpload} />
@@ -853,8 +738,6 @@ export default function ChatPage() {
               </button>
             </>
           )}
-
-          {/* Proof of the Day button for Plus+ non-admin */}
           {!isAdmin && (
             <>
               <input ref={proofFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleProofFileSelect} />
@@ -878,7 +761,6 @@ export default function ChatPage() {
               </button>
             </>
           )}
-
           <input
             ref={inputRef}
             className="input-base flex-1"
