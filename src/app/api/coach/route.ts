@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/coach-reply`, {
+    fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/coach-reply`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.COACH_SECRET}`,
