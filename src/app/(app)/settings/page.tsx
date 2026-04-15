@@ -5,17 +5,6 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
-const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!
-
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
-  const rawData = window.atob(base64)
-  const outputArray = new Uint8Array(rawData.length)
-  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i)
-  return outputArray
-}
-
 export default function SettingsPage() {
   const supabase = createClient()
   const router = useRouter()
@@ -23,94 +12,20 @@ export default function SettingsPage() {
   const [confirmText, setConfirmText] = useState('')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [toast, setToast] = useState('')
-  const [reminderEnabled, setReminderEnabled] = useState(false)
-  const [reminderTime, setReminderTime] = useState('20:00')
-  const [notifPermission, setNotifPermission] = useState<string>('default')
-  const [savingReminder, setSavingReminder] = useState(false)
   const [proofPhotosPublic, setProofPhotosPublic] = useState(true)
   const [savingPrivacy, setSavingPrivacy] = useState(false)
   const [userId, setUserId] = useState('')
 
   useEffect(() => {
-    if ('Notification' in window) setNotifPermission(Notification.permission)
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
       setUserId(user.id)
-      const { data } = await supabase.from('profiles').select('reminder_enabled, reminder_time, proof_photos_public').eq('id', user.id).maybeSingle()
-      if (data) {
-        setReminderEnabled(data.reminder_enabled || false)
-        setReminderTime(data.reminder_time || '20:00')
-        setProofPhotosPublic(data.proof_photos_public ?? true)
-      }
+      const { data } = await supabase.from('profiles').select('proof_photos_public').eq('id', user.id).maybeSingle()
+      if (data) setProofPhotosPublic(data.proof_photos_public ?? true)
     }
     load()
   }, [supabase])
-
-  async function registerPush(): Promise<PushSubscription | null> {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null
-    const reg = await navigator.serviceWorker.ready
-    const existing = await reg.pushManager.getSubscription()
-    if (existing) return existing
-    const sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-    })
-    return sub
-  }
-
-  async function saveReminder(enabled: boolean, time: string) {
-    setSavingReminder(true)
-
-    if (enabled) {
-      if (!('Notification' in window)) {
-        setToast('Notifications not supported on this browser')
-        setSavingReminder(false)
-        return
-      }
-      if (Notification.permission !== 'granted') {
-        const perm = await Notification.requestPermission()
-        setNotifPermission(perm)
-        if (perm !== 'granted') {
-          setToast('Please allow notifications to enable reminders')
-          setSavingReminder(false)
-          return
-        }
-      }
-
-      const sub = await registerPush()
-      if (!sub) {
-        setToast('Could not register for notifications')
-        setSavingReminder(false)
-        return
-      }
-
-      await fetch('/api/push/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subscription: sub }),
-      })
-    } else {
-      await fetch('/api/push/subscribe', { method: 'DELETE' })
-      if ('serviceWorker' in navigator) {
-        const reg = await navigator.serviceWorker.ready
-        const sub = await reg.pushManager.getSubscription()
-        if (sub) await sub.unsubscribe()
-      }
-    }
-
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      await supabase.from('profiles').update({
-        reminder_enabled: enabled,
-        reminder_time: time,
-      }).eq('id', user.id)
-    }
-
-    setReminderEnabled(enabled)
-    setToast(enabled ? `Reminder set for ${time} daily ✓` : 'Reminder disabled')
-    setSavingReminder(false)
-  }
 
   async function saveProofPrivacy(val: boolean) {
     setSavingPrivacy(true)
@@ -145,50 +60,7 @@ export default function SettingsPage() {
 
       <div className="mb-5">
         <h1 className="text-xl font-bold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Settings</h1>
-        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Account and notifications</p>
-      </div>
-
-      {/* Daily Reminder */}
-      <div className="card p-4 mb-4">
-        <h2 className="text-sm font-semibold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Daily step reminder</h2>
-        <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
-          Get a push notification daily to log your steps and weight. Works even when the app is closed.
-        </p>
-
-        {notifPermission === 'denied' && (
-          <div className="px-3 py-2 rounded-xl text-xs mb-3" style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--danger)' }}>
-            Notifications are blocked. Go to your browser settings and allow notifications for nuroni.app.
-          </div>
-        )}
-
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Enable reminder</p>
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Once per day at your chosen time</p>
-          </div>
-          <button
-            onClick={() => saveReminder(!reminderEnabled, reminderTime)}
-            disabled={savingReminder}
-            style={{ background: reminderEnabled ? 'var(--accent)' : 'var(--border)', width: 44, height: 26, borderRadius: 999, position: 'relative', border: 'none', cursor: 'pointer', transition: 'background 0.2s', flexShrink: 0 }}
-          >
-            <div style={{ position: 'absolute', top: 3, width: 20, height: 20, background: 'white', borderRadius: '50%', transition: 'left 0.2s', left: reminderEnabled ? '21px' : '3px' }} />
-          </button>
-        </div>
-
-        {reminderEnabled && (
-          <div className="animate-fade-in">
-            <label className="label">Reminder time <span style={{ color: 'var(--text-muted)' }}>(set in your local time)</span></label>
-            <div className="flex items-center gap-3">
-              <input type="time" className="input-base flex-1" value={reminderTime} onChange={e => setReminderTime(e.target.value)} />
-              <button onClick={() => saveReminder(true, reminderTime)} disabled={savingReminder} className="btn-primary py-3 px-4 text-sm">
-                {savingReminder ? '…' : 'Save'}
-              </button>
-            </div>
-            <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
-              Must be installed as a PWA (Add to Home Screen) for notifications to work when the app is closed.
-            </p>
-          </div>
-        )}
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Account and privacy</p>
       </div>
 
       {/* Privacy */}
