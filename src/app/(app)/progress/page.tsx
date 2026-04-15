@@ -53,14 +53,14 @@ function getWeeklySummary(entries: Entry[], unit: string) {
 }
 
 function getMilestone(lostSoFar: number, unit: string, pctToGoal: number): string | null {
-  if (pctToGoal >= 100) return `🏆 You reached your goal! Incredible work.`
-  if (pctToGoal >= 75) return `🔥 75% of the way there — keep pushing!`
-  if (pctToGoal >= 50) return `⚡ Halfway to your goal!`
-  if (pctToGoal >= 25) return `💪 25% of the way there — great start!`
-  if (lostSoFar >= 20) return `🌟 20 ${unit} lost — that's a big deal!`
-  if (lostSoFar >= 10) return `🎯 10 ${unit} lost — momentum is real!`
-  if (lostSoFar >= 5) return `✨ 5 ${unit} lost — you're doing it!`
-  if (lostSoFar >= 1) return `🌱 First pound down — the journey begins!`
+  if (pctToGoal >= 100) return `You reached your goal! Incredible work.`
+  if (pctToGoal >= 75) return `75% of the way there — keep pushing!`
+  if (pctToGoal >= 50) return `Halfway to your goal!`
+  if (pctToGoal >= 25) return `25% of the way there — great start!`
+  if (lostSoFar >= 20) return `20 ${unit} lost — that's a big deal!`
+  if (lostSoFar >= 10) return `10 ${unit} lost — momentum is real!`
+  if (lostSoFar >= 5) return `5 ${unit} lost — you're doing it!`
+  if (lostSoFar >= 1) return `First pound down — the journey begins!`
   return null
 }
 
@@ -80,7 +80,7 @@ function getPace(entries: Entry[], goalWeight: number): string | null {
   const weeklyLoss = (oldest - newest)
   if (weeklyLoss <= 0) return null
   const remaining = newest - goalWeight
-  if (remaining <= 0) return 'You\'ve already hit your goal! 🎯'
+  if (remaining <= 0) return 'You\'ve already hit your goal!'
   const weeks = Math.ceil(remaining / weeklyLoss)
   if (weeks > 200) return null
   const target = new Date(Date.now() + weeks * 7 * 86400000)
@@ -90,20 +90,29 @@ function getPace(entries: Entry[], goalWeight: number): string | null {
 function PlusGate({ onUpgrade }: { onUpgrade: () => void }) {
   return (
     <div className="card p-4 text-center" style={{ border: '1px dashed var(--border)' }}>
-      <div className="text-2xl mb-2">✦</div>
+      <div className="text-2xl mb-2">+</div>
       <p className="text-sm font-semibold mb-1" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-display)' }}>Plus+ feature</p>
       <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>Upgrade to unlock this and more for $5/month.</p>
-      <button onClick={onUpgrade} className="btn-primary text-sm py-2 px-4">Upgrade to Plus+ →</button>
+      <button onClick={onUpgrade} className="btn-primary text-sm py-2 px-4">Upgrade to Plus+ </button>
     </div>
   )
 }
 
-// Days since last entry
 function daysSinceLastEntry(entries: Entry[]): number | null {
   if (!entries.length) return null
   const last = new Date(entries[0].created_at)
   const now = new Date()
   return Math.floor((now.getTime() - last.getTime()) / 86400000)
+}
+
+function getMaxBackdate(): string {
+  const d = new Date()
+  d.setDate(d.getDate() - 7)
+  return d.toISOString().split('T')[0]
+}
+
+function getTodayLocal(): string {
+  return new Date().toISOString().split('T')[0]
 }
 
 export default function ProgressPage() {
@@ -122,6 +131,7 @@ export default function ProgressPage() {
   const [exportLoading, setExportLoading] = useState(false)
   const [showShareCard, setShowShareCard] = useState(false)
   const [nudgeDismissed, setNudgeDismissed] = useState(false)
+  const [logDate, setLogDate] = useState(getTodayLocal())
 
   const [weightInput, setWeightInput] = useState('')
   const [stepsInput, setStepsInput] = useState('')
@@ -147,7 +157,6 @@ export default function ProgressPage() {
 
   useEffect(() => { load() }, [load])
 
-  // Push notification setup
   useEffect(() => {
     if ('serviceWorker' in navigator && 'Notification' in window) {
       Notification.requestPermission()
@@ -159,6 +168,11 @@ export default function ProgressPage() {
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
+
+    // Build timestamp from chosen date at noon local time to avoid timezone issues
+    const chosenDate = new Date(`${logDate}T12:00:00`)
+    const isToday = logDate === getTodayLocal()
+
     const { error } = await supabase.from('entries').insert({
       user_id: user.id,
       weight: parseFloat(weightInput),
@@ -166,13 +180,15 @@ export default function ProgressPage() {
       distance: distanceInput ? parseFloat(distanceInput) : null,
       note: noteInput || null,
       activities: activitiesInput.length > 0 ? activitiesInput : null,
+      created_at: isToday ? new Date().toISOString() : chosenDate.toISOString(),
     })
     if (!error) {
-      setToast('Entry logged ✓')
+      setToast(isToday ? 'Entry logged!' : `Entry logged for ${new Date(logDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}!`)
       setStepsInput('')
       setDistanceInput('')
       setNoteInput('')
       setActivitiesInput([])
+      setLogDate(getTodayLocal())
       setNudgeDismissed(true)
       await load()
     }
@@ -195,7 +211,7 @@ export default function ProgressPage() {
 
   async function downloadShareCard() {
     if (!profile) return
-    setToast('Generating card…')
+    setToast('Generating card...')
     const url = `/api/share-card?username=${profile.username}`
     const res = await fetch(url)
     const blob = await res.blob()
@@ -282,7 +298,6 @@ export default function ProgressPage() {
     <div className="w-full max-w-lg mx-auto px-4 py-5 space-y-5 overflow-x-hidden">
       {toast && <Toast msg={toast} onDone={() => setToast('')} />}
 
-      {/* Login nudge banner */}
       {showNudge && (
         <div className="card p-3.5 flex items-center justify-between gap-3 animate-fade-in" style={{ background: 'rgba(45,212,191,0.06)', borderColor: 'rgba(45,212,191,0.25)' }}>
           <div className="flex items-center gap-2.5 min-w-0">
@@ -297,7 +312,6 @@ export default function ProgressPage() {
         </div>
       )}
 
-      {/* Header */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -327,7 +341,6 @@ export default function ProgressPage() {
         </div>
       </div>
 
-      {/* Share card modal */}
       {showShareCard && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }} onClick={() => setShowShareCard(false)}>
           <div className="card p-5 w-full max-w-sm animate-fade-in" onClick={e => e.stopPropagation()}>
@@ -335,8 +348,6 @@ export default function ProgressPage() {
               Share your progress
             </h3>
             <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>Choose how you want to share</p>
-
-            {/* Preview */}
             <div className="rounded-xl overflow-hidden mb-4 border" style={{ borderColor: 'var(--border)' }}>
               <img
                 src={`/api/share-card?username=${profile.username}`}
@@ -344,7 +355,6 @@ export default function ProgressPage() {
                 style={{ width: '100%', height: 'auto', display: 'block' }}
               />
             </div>
-
             <div className="space-y-2">
               <button onClick={downloadShareCard} className="btn-primary w-full gap-2">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -365,17 +375,15 @@ export default function ProgressPage() {
         </div>
       )}
 
-      {/* Milestone banner */}
       {milestone && lostSoFar > 0 && (
         <div className="card p-3 flex items-center gap-3" style={{ background: 'var(--accent-subtle)', borderColor: 'rgba(45,212,191,0.3)' }}>
           <p className="text-sm font-medium flex-1" style={{ color: 'var(--accent-text)' }}>{milestone}</p>
         </div>
       )}
 
-      {/* Streak + Weekly */}
       <div className="grid grid-cols-2 gap-3">
         <div className="stat-card flex items-center gap-3">
-          <div className="text-2xl">{streak >= 7 ? '🔥' : streak >= 3 ? '⚡' : '📅'}</div>
+          <div className="text-2xl">{streak >= 7 ? 'fire' : streak >= 3 ? 'bolt' : 'cal'}</div>
           <div>
             <div className="stat-value" style={{ fontSize: '1.5rem' }}>{streak}</div>
             <div className="stat-label">Day streak</div>
@@ -390,7 +398,7 @@ export default function ProgressPage() {
           </div>
           {weekly ? (
             <div className="stat-value" style={{ fontSize: '1.25rem', color: weekly.change > 0 ? 'var(--success)' : weekly.change < 0 ? 'var(--danger)' : 'var(--text-primary)' }}>
-              {weekly.change > 0 ? `−${weekly.change}` : weekly.change < 0 ? `+${Math.abs(weekly.change)}` : '—'} {unit}
+              {weekly.change > 0 ? `-${weekly.change}` : weekly.change < 0 ? `+${Math.abs(weekly.change)}` : '-'} {unit}
             </div>
           ) : (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Log more days</div>
@@ -398,14 +406,13 @@ export default function ProgressPage() {
         </button>
       </div>
 
-      {/* Weekly expanded */}
       {showWeekly && weekly && (
         <div className="card p-4 animate-fade-in">
           <h3 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Weekly summary</h3>
           <div className="grid grid-cols-3 gap-3 text-center">
             <div>
               <div className="text-lg font-bold" style={{ color: weekly.change > 0 ? 'var(--success)' : 'var(--danger)', fontFamily: 'var(--font-display)' }}>
-                {weekly.change > 0 ? `−${weekly.change}` : `+${Math.abs(weekly.change)}`}
+                {weekly.change > 0 ? `-${weekly.change}` : `+${Math.abs(weekly.change)}`}
               </div>
               <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{unit} this week</div>
             </div>
@@ -420,7 +427,7 @@ export default function ProgressPage() {
           </div>
           <button
             onClick={async () => {
-              const text = `📊 My Nuroni week:\n${weekly.change > 0 ? `−${weekly.change}` : `+${Math.abs(weekly.change)}`} ${unit} · ${weekly.avgSteps.toLocaleString()} avg steps · ${weekly.days} days logged\n\nnuroni.app/u/${profile.username}`
+              const text = `My Nuroni week:\n${weekly.change > 0 ? `-${weekly.change}` : `+${Math.abs(weekly.change)}`} ${unit} · ${weekly.avgSteps.toLocaleString()} avg steps · ${weekly.days} days logged\n\nnuroni.app/u/${profile.username}`
               if (navigator.share) await navigator.share({ text })
               else { await navigator.clipboard.writeText(text); setToast('Weekly summary copied!') }
             }}
@@ -431,15 +438,12 @@ export default function ProgressPage() {
         </div>
       )}
 
-      {/* Pace tracker */}
       {isPlus && pace && (
         <div className="card p-3.5 flex items-center gap-3" style={{ background: 'var(--accent-subtle)', borderColor: 'rgba(45,212,191,0.2)' }}>
-          <span className="text-lg">⏱️</span>
           <p className="text-sm" style={{ color: 'var(--accent-text)' }}>{pace}</p>
         </div>
       )}
 
-      {/* Progress to goal */}
       <div className="card p-4">
         <div className="flex items-center justify-between mb-3">
           <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Progress to goal</span>
@@ -450,17 +454,16 @@ export default function ProgressPage() {
         </div>
         <div className="flex justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
           <span>Start: {profile.start_weight} {unit}</span>
-          <span>{lostSoFar > 0 ? `−${lostSoFar} ${unit} lost` : 'Keep going!'}</span>
+          <span>{lostSoFar > 0 ? `-${lostSoFar} ${unit} lost` : 'Keep going!'}</span>
           <span>Goal: {goal.goal_weight} {unit}</span>
         </div>
       </div>
 
-      {/* Stat cards */}
       <div className="grid grid-cols-2 gap-3">
         <div className="stat-card"><div className="stat-value">{currentWeight}</div><div className="stat-label">Current {unit}</div></div>
         <div className="stat-card">
           <div className="stat-value" style={{ color: lostSoFar > 0 ? 'var(--success)' : 'var(--text-primary)' }}>
-            {lostSoFar > 0 ? `−${lostSoFar}` : lostSoFar === 0 ? '0' : `+${Math.abs(lostSoFar)}`}
+            {lostSoFar > 0 ? `-${lostSoFar}` : lostSoFar === 0 ? '0' : `+${Math.abs(lostSoFar)}`}
           </div>
           <div className="stat-label">Lost ({unit})</div>
         </div>
@@ -470,7 +473,23 @@ export default function ProgressPage() {
 
       {/* Log entry */}
       <div className="card p-4">
-        <h2 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Log today</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+            {logDate === getTodayLocal() ? 'Log today' : `Logging for ${new Date(logDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
+          </h2>
+          <div className="flex items-center gap-2">
+            <label className="text-xs" style={{ color: 'var(--text-muted)' }}>Date:</label>
+            <input
+              type="date"
+              className="input-base text-xs py-1 px-2"
+              style={{ width: 'auto', minWidth: 0 }}
+              value={logDate}
+              min={getMaxBackdate()}
+              max={getTodayLocal()}
+              onChange={e => setLogDate(e.target.value)}
+            />
+          </div>
+        </div>
         <div className="grid grid-cols-3 gap-2 mb-3">
           <div>
             <label className="label">Weight ({unit})</label>
@@ -491,7 +510,6 @@ export default function ProgressPage() {
             <input className="input-base" placeholder="How are you feeling today?" value={noteInput} onChange={e => setNoteInput(e.target.value)} />
           </div>
         )}
-        {/* Activity pills */}
         <div className="mb-3">
           <label className="label">Activities today <span style={{ color: 'var(--text-muted)' }}>(optional)</span></label>
           <div className="flex flex-wrap gap-1.5 mt-1">
@@ -518,11 +536,10 @@ export default function ProgressPage() {
           </div>
         </div>
         <button className="btn-primary w-full" onClick={logEntry} disabled={saving || !weightInput}>
-          {saving ? 'Saving…' : 'Log entry'}
+          {saving ? 'Saving...' : logDate === getTodayLocal() ? 'Log entry' : 'Log past entry'}
         </button>
       </div>
 
-      {/* Chart */}
       {chartData.length > 1 && (
         <div className="card p-4 overflow-hidden">
           <div className="flex items-center justify-between mb-3">
@@ -555,11 +572,10 @@ export default function ProgressPage() {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
           </svg>
-          {exportLoading ? 'Exporting…' : 'Export as CSV'}
+          {exportLoading ? 'Exporting...' : 'Export as CSV'}
         </button>
       )}
 
-      {/* History */}
       {entries.length > 0 && (
         <div className="card p-4">
           <h2 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>History</h2>
@@ -593,7 +609,7 @@ export default function ProgressPage() {
 
       {!isPlus && (
         <button onClick={() => router.push('/plus')} className="w-full card p-4 text-center" style={{ border: '1px solid var(--accent)', cursor: 'pointer' }}>
-          <p className="text-sm font-semibold" style={{ color: 'var(--accent)', fontFamily: 'var(--font-display)' }}>✦ Upgrade to Plus+ — $5/month</p>
+          <p className="text-sm font-semibold" style={{ color: 'var(--accent)', fontFamily: 'var(--font-display)' }}>Upgrade to Plus+ — $5/month</p>
           <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Trend line · Pace tracker · Notes · Export · Community</p>
         </button>
       )}
