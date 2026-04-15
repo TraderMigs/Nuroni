@@ -17,6 +17,7 @@ interface Message {
   start_weight?: number
   current_weight?: number
   is_admin?: boolean
+  is_coach?: boolean
 }
 
 interface ProfileModal {
@@ -29,6 +30,12 @@ interface ProfileModal {
   weight_unit: string
   follower_count: number
 }
+
+const COACH_IDS = new Set([
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000002',
+  '00000000-0000-0000-0000-000000000003',
+])
 
 const BLOCKED_PATTERNS = [
   /instagram|facebook|tiktok|snapchat|twitter|youtube|linkedin|pinterest|threads|reddit|whatsapp|telegram|discord|twitch/i,
@@ -92,7 +99,7 @@ export default function ChatPage() {
   const fetchProfiles = useCallback(async (userIds: string[]) => {
     const { data: profiles } = await supabase
       .from('profiles')
-      .select('id, display_name, username, weight_unit, start_weight, is_admin')
+      .select('id, display_name, username, weight_unit, start_weight, is_admin, is_coach')
       .in('id', userIds)
 
     const { data: entries } = await supabase
@@ -113,6 +120,7 @@ export default function ChatPage() {
         start_weight: p.start_weight,
         current_weight: latestWeights[p.id],
         is_admin: p.is_admin,
+        is_coach: p.is_coach,
       }
     })
     return result
@@ -133,11 +141,9 @@ export default function ChatPage() {
       setIsPlus(true)
       setIsAdmin(profile?.is_admin || false)
 
-      // Show one-time tip if never seen
       const tipSeen = localStorage.getItem('nuroni-chat-tip')
       if (!tipSeen) setShowTip(true)
 
-      // Load follows
       const { data: follows } = await supabase
         .from('follows')
         .select('following_id')
@@ -203,7 +209,7 @@ export default function ChatPage() {
   }, [showTip])
 
   async function openProfile(msg: Message) {
-    if (!msg.username) return
+    if (!msg.username || msg.is_coach || COACH_IDS.has(msg.user_id)) return
     const { data: goal } = await supabase
       .from('goals')
       .select('goal_weight')
@@ -298,7 +304,7 @@ export default function ChatPage() {
       <div className="text-4xl mb-4">💬</div>
       <h2 className="text-lg font-bold mb-2" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Fitness Chat</h2>
       <p className="text-sm mb-5" style={{ color: 'var(--text-secondary)', maxWidth: 280 }}>Real conversations with real people on real journeys. Plus+ exclusive.</p>
-      <button onClick={() => router.push('/plus')} className="btn-primary">Upgrade to Plus+ →</button>
+      <button onClick={() => router.push('/plus')} className="btn-primary">Upgrade to Plus+</button>
     </div>
   )
 
@@ -310,23 +316,21 @@ export default function ChatPage() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-112px)] max-w-lg mx-auto w-full overflow-x-hidden">
-      {/* Header */}
       <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
         <div>
           <h1 className="text-base font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Fitness Chat</h1>
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Plus+ members · fitness topics only</p>
         </div>
-        <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: 'var(--accent)', color: '#0D1117' }}>✦ Live</span>
+        <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: 'var(--accent)', color: '#0D1117' }}>Live</span>
       </div>
 
-      {/* One-time tip */}
       {showTip && (
         <div
           className="mx-4 mt-2 px-4 py-3 rounded-xl flex items-center justify-between gap-3 animate-fade-in"
           style={{ background: 'var(--accent-subtle)', border: '1px solid rgba(45,212,191,0.3)' }}
         >
           <p className="text-xs" style={{ color: 'var(--accent-text)', lineHeight: 1.5 }}>
-            💡 <strong>Tap any name</strong> to check their stats and follow their journey.
+            Tap any name to check their stats and follow their journey.
           </p>
           <button onClick={dismissTip} style={{ color: 'var(--accent-text)', flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer' }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -334,7 +338,6 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {messages.length === 0 && (
           <div className="text-center py-12">
@@ -346,6 +349,7 @@ export default function ChatPage() {
 
         {messages.map((msg, i) => {
           const isMe = msg.user_id === userId
+          const isCoach = msg.is_coach || COACH_IDS.has(msg.user_id)
           const isFollowed = followedIds.has(msg.user_id)
           const showName = !isMe && (i === 0 || messages[i - 1].user_id !== msg.user_id)
           const lostSoFar = msg.start_weight && msg.current_weight ? parseFloat((msg.start_weight - msg.current_weight).toFixed(1)) : null
@@ -356,16 +360,23 @@ export default function ChatPage() {
                 <button
                   className="flex items-center gap-1.5 mb-1 ml-1 flex-wrap"
                   onClick={() => openProfile(msg)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                  style={{ background: 'none', border: 'none', cursor: isCoach ? 'default' : 'pointer', padding: 0 }}
                 >
-                  <span className="text-xs font-semibold" style={{ color: isFollowed ? 'var(--accent)' : 'var(--text-primary)' }}>
+                  <span className="text-xs font-semibold" style={{ color: isCoach ? '#a78bfa' : isFollowed ? 'var(--accent)' : 'var(--text-primary)' }}>
                     {msg.display_name || msg.username || 'Member'}
-                    {isFollowed && <span className="ml-1">⭐</span>}
-                    {msg.is_admin && <span className="ml-1 text-xs px-1 rounded" style={{ background: 'var(--accent)', color: '#0D1117', fontSize: '9px' }}>ADMIN</span>}
                   </span>
-                  {lostSoFar !== null && lostSoFar > 0 && (
+                  {isCoach && (
+                    <span className="text-xs px-1.5 py-0.5 rounded-full font-bold" style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa', fontSize: '9px', border: '1px solid rgba(167,139,250,0.3)' }}>
+                      AI COACH
+                    </span>
+                  )}
+                  {!isCoach && isFollowed && <span className="ml-1">⭐</span>}
+                  {!isCoach && msg.is_admin && (
+                    <span className="ml-1 text-xs px-1 rounded" style={{ background: 'var(--accent)', color: '#0D1117', fontSize: '9px' }}>ADMIN</span>
+                  )}
+                  {!isCoach && lostSoFar !== null && lostSoFar > 0 && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
-                      −{lostSoFar} {msg.weight_unit || 'lbs'}
+                      -{lostSoFar} {msg.weight_unit || 'lbs'}
                     </span>
                   )}
                 </button>
@@ -381,9 +392,21 @@ export default function ChatPage() {
                 <div
                   className="max-w-[80%] px-3 py-2 rounded-2xl text-sm"
                   style={{
-                    background: isMe ? 'var(--accent)' : isFollowed ? 'rgba(45,212,191,0.08)' : 'var(--bg-card)',
+                    background: isMe
+                      ? 'var(--accent)'
+                      : isCoach
+                      ? 'rgba(167,139,250,0.08)'
+                      : isFollowed
+                      ? 'rgba(45,212,191,0.08)'
+                      : 'var(--bg-card)',
                     color: isMe ? '#0D1117' : 'var(--text-primary)',
-                    border: isMe ? 'none' : isFollowed ? '1px solid rgba(45,212,191,0.3)' : '1px solid var(--border)',
+                    border: isMe
+                      ? 'none'
+                      : isCoach
+                      ? '1px solid rgba(167,139,250,0.25)'
+                      : isFollowed
+                      ? '1px solid rgba(45,212,191,0.3)'
+                      : '1px solid var(--border)',
                     borderBottomRightRadius: isMe ? 4 : undefined,
                     borderBottomLeftRadius: !isMe ? 4 : undefined,
                     opacity: msg.id.startsWith('temp-') ? 0.7 : 1,
@@ -401,7 +424,6 @@ export default function ChatPage() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Profile modal */}
       {profileModal && (
         <div className="fixed inset-0 z-50 flex items-end justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={() => setProfileModal(null)}>
           <div className="card w-full max-w-sm p-5 animate-fade-in" onClick={e => e.stopPropagation()}>
@@ -433,18 +455,18 @@ export default function ChatPage() {
               </div>
               <div className="stat-card text-center p-3">
                 <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--success)' }}>
-                  {profileModal.start_weight - profileModal.current_weight > 0 ? `−${parseFloat((profileModal.start_weight - profileModal.current_weight).toFixed(1))}` : '0'}
+                  {profileModal.start_weight - profileModal.current_weight > 0 ? `-${parseFloat((profileModal.start_weight - profileModal.current_weight).toFixed(1))}` : '0'}
                 </div>
                 <div className="stat-label">lost</div>
               </div>
               <div className="stat-card text-center p-3">
-                <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{profileModal.goal_weight || '—'}</div>
+                <div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{profileModal.goal_weight || '-'}</div>
                 <div className="stat-label">goal</div>
               </div>
             </div>
 
             <a href={`/u/${profileModal.username}`} target="_blank" rel="noopener noreferrer" className="btn-secondary w-full text-sm" style={{ display: 'flex', textDecoration: 'none' }}>
-              View full profile →
+              View full profile
             </a>
           </div>
         </div>
@@ -452,17 +474,16 @@ export default function ChatPage() {
 
       {blockedNotice && (
         <div className="mx-4 mb-2 px-3 py-2 rounded-xl text-xs text-center" style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--danger)' }}>
-          Keep it in-app — links, socials, and contact info aren&apos;t allowed here.
+          Keep it in-app — links, socials, and contact info are not allowed here.
         </div>
       )}
 
       {uploading && (
         <div className="mx-4 mb-2 px-3 py-2 rounded-xl text-xs text-center" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
-          Uploading…
+          Uploading...
         </div>
       )}
 
-      {/* Input */}
       <div className="px-4 pb-4 pt-2 border-t" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
         <div className="flex items-center gap-2">
           {isAdmin && (
@@ -478,7 +499,7 @@ export default function ChatPage() {
           <input
             ref={inputRef}
             className="input-base flex-1"
-            placeholder={isAdmin ? 'Send anything…' : 'Ask about workouts, meals, progress…'}
+            placeholder={isAdmin ? 'Send anything...' : 'Ask about workouts, meals, progress...'}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
