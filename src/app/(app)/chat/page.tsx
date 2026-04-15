@@ -36,7 +36,17 @@ const COACH_IDS = new Set([
   '00000000-0000-0000-0000-000000000001',
   '00000000-0000-0000-0000-000000000002',
   '00000000-0000-0000-0000-000000000003',
+  '00000000-0000-0000-0000-000000000004',
+  '00000000-0000-0000-0000-000000000005',
 ])
+
+const COACH_SPECIALTIES: Record<string, string> = {
+  '00000000-0000-0000-0000-000000000001': 'Fat Loss & Steps',
+  '00000000-0000-0000-0000-000000000002': 'Strength & Lifting',
+  '00000000-0000-0000-0000-000000000003': 'Cardio & Conditioning',
+  '00000000-0000-0000-0000-000000000004': 'Nutrition & Diet',
+  '00000000-0000-0000-0000-000000000005': 'Mindset & Motivation',
+}
 
 const BLOCKED_PATTERNS = [
   /instagram|facebook|tiktok|snapchat|twitter|youtube|linkedin|pinterest|threads|reddit|whatsapp|telegram|discord|twitch/i,
@@ -210,7 +220,7 @@ export default function ChatPage() {
     }
   }, [showTip])
 
-  function buildContext(currentMessages: Message[], currentUserId: string): { role: string; content: string }[] {
+  function buildContext(currentMessages: Message[]): { role: string; content: string }[] {
     return currentMessages
       .slice(-6)
       .filter(m => m.content)
@@ -289,7 +299,7 @@ export default function ChatPage() {
     } else if (data) {
       setMessages(prev => prev.map(m => m.id === tempId ? { ...data, ...profileCache[userId] } : m))
       if (content) {
-        const context = buildContext(messages, userId)
+        const context = buildContext(messages)
         fetch('/api/coach', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -378,8 +388,8 @@ export default function ChatPage() {
           const isFollowed = followedIds.has(msg.user_id)
           const showName = !isMe && (i === 0 || messages[i - 1].user_id !== msg.user_id)
           const lostSoFar = msg.start_weight && msg.current_weight ? parseFloat((msg.start_weight - msg.current_weight).toFixed(1)) : null
+          const specialty = isCoach ? COACH_SPECIALTIES[msg.user_id] : null
           const hasQuickReplies = isCoach && msg.quick_replies && msg.quick_replies.length > 0 && !usedQuickReplies.has(msg.id)
-          // Only show quick replies on the last coach message
           const isLastCoachMsg = hasQuickReplies && !messages.slice(i + 1).some(m => COACH_IDS.has(m.user_id))
 
           return (
@@ -396,6 +406,11 @@ export default function ChatPage() {
                   {isCoach && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full font-bold" style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa', fontSize: '9px', border: '1px solid rgba(167,139,250,0.3)' }}>
                       AI COACH
+                    </span>
+                  )}
+                  {isCoach && specialty && (
+                    <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(167,139,250,0.08)', color: 'rgba(167,139,250,0.7)', fontSize: '9px', border: '1px solid rgba(167,139,250,0.15)' }}>
+                      {specialty}
                     </span>
                   )}
                   {!isCoach && isFollowed && <span className="ml-1">⭐</span>}
@@ -446,7 +461,6 @@ export default function ChatPage() {
                 </div>
               )}
 
-              {/* Quick reply pills — only on last coach message with question */}
               {isLastCoachMsg && (
                 <div className="flex flex-wrap gap-1.5 mt-2 max-w-[85%]">
                   {msg.quick_replies!.map((reply, ri) => (
