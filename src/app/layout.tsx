@@ -5,6 +5,10 @@ export const metadata: Metadata = {
   title: "Nuroni — Track less. Show real progress.",
   description: "Simple, shareable weight loss progress tracker. Built for real journeys.",
   manifest: "/manifest.json",
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/icons/icon-192.png",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -40,7 +44,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="mobile-web-app-capable" content="yes" />
         <script
           dangerouslySetInnerHTML={{
             __html: `
