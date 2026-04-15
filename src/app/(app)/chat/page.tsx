@@ -276,6 +276,13 @@ export default function ChatPage() {
       if (!mediaUrl) setInput(text)
     } else if (data) {
       setMessages(prev => prev.map(m => m.id === tempId ? { ...data, ...profileCache[userId] } : m))
+      if (text) {
+        fetch('/api/coach', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: text, user_id: userId }),
+        }).catch(() => {})
+      }
     }
   }
 
