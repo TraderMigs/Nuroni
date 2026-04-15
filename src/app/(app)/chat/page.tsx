@@ -152,7 +152,13 @@ export default function ChatPage() {
   const [followLoading, setFollowLoading] = useState(false)
   const [showTip, setShowTip] = useState(false)
   const [showCoachTip, setShowCoachTip] = useState(false)
-  const [usedQuickReplies, setUsedQuickReplies] = useState<Set<string>>(new Set())
+  const [usedQuickReplies, setUsedQuickReplies] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem('nuroni-used-pills')
+      return stored ? new Set<string>(JSON.parse(stored)) : new Set<string>()
+    } catch { return new Set<string>() }
+  })
+  const [otherHint, setOtherHint] = useState<string | null>(null)
   const [heartState, setHeartState] = useState<HeartState>({})
   const [fullscreenPhoto, setFullscreenPhoto] = useState<string | null>(null)
 
@@ -322,6 +328,10 @@ export default function ChatPage() {
     if (proofToast) { const t = setTimeout(() => setProofToast(''), 3000); return () => clearTimeout(t) }
   }, [proofToast])
 
+  useEffect(() => {
+    try { localStorage.setItem('nuroni-used-pills', JSON.stringify(Array.from(usedQuickReplies))) } catch {}
+  }, [usedQuickReplies])
+
   function buildContext(currentMessages: Message[]): { role: string; content: string; coach_id?: string; had_quick_replies?: boolean }[] {
     return currentMessages.slice(-6).filter(m => m.content && !m.content.startsWith('proof_category:')).map(m => ({
       role: COACH_IDS.has(m.user_id) ? 'assistant' : 'user',
@@ -393,6 +403,7 @@ export default function ChatPage() {
     const optimistic: Message = { id: tempId, user_id: userId, content, media_url: mediaUrl || null, media_type: mediaType || null, created_at: new Date().toISOString(), ...profileCache[userId] }
     setMessages(prev => [...prev, optimistic])
     if (!text) setInput('')
+    setOtherHint(null)
     inputRef.current?.focus()
 
     setSending(true)
@@ -649,7 +660,12 @@ export default function ChatPage() {
                   ))}
                   {pillsAreForMe && (
                     <button
-                      onClick={() => setUsedQuickReplies(prev => new Set(Array.from(prev).concat(msg.id)))}
+                      onClick={() => {
+                        setUsedQuickReplies(prev => new Set(Array.from(prev).concat(msg.id)))
+                        const coachName = msg.display_name || 'the coach'
+                        setOtherHint(`Type your answer to ${coachName}...`)
+                        setTimeout(() => inputRef.current?.focus(), 50)
+                      }}
                       className="text-xs px-3 py-1.5 rounded-full font-medium transition-all"
                       style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border)', cursor: 'pointer' }}
                     >
@@ -741,6 +757,11 @@ export default function ChatPage() {
       )}
 
       <div className="flex-shrink-0 px-4 pb-4 pt-2 border-t" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
+        {otherHint && (
+          <div className="mb-2 px-3 py-1.5 rounded-xl text-xs text-center animate-fade-in" style={{ background: 'rgba(167,139,250,0.08)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)' }}>
+            {otherHint}
+          </div>
+        )}
         <div className="flex items-center gap-2">
           {isAdmin && (
             <>
@@ -780,7 +801,7 @@ export default function ChatPage() {
             className="input-base flex-1"
             placeholder={isAdmin ? 'Send anything...' : 'Chat or type @coach to ask a coach...'}
             value={input}
-            onChange={e => setInput(e.target.value)}
+            onChange={e => { setInput(e.target.value); if (otherHint) setOtherHint(null) }}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
             maxLength={isAdmin ? 2000 : 500}
           />
