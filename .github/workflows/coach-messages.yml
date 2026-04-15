@@ -1,0 +1,45 @@
+name: AI Coach Messages
+
+on:
+  schedule:
+    - cron: '0 8 * * *'   # 8AM UTC — morning
+    - cron: '0 12 * * *'  # 12PM UTC — midday
+    - cron: '0 17 * * *'  # 5PM UTC — afternoon
+    - cron: '0 21 * * *'  # 9PM UTC — evening
+  workflow_dispatch:       # allow manual trigger
+
+jobs:
+  post-maya:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post Coach Maya message
+        run: |
+          curl -s -X POST \
+            "${{ secrets.SUPABASE_FUNCTION_URL }}/post-coach-message" \
+            -H "Authorization: Bearer ${{ secrets.COACH_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"coach":"maya"}'
+
+  post-dex:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post Coach Dex message
+        run: |
+          sleep 30
+          curl -s -X POST \
+            "${{ secrets.SUPABASE_FUNCTION_URL }}/post-coach-message" \
+            -H "Authorization: Bearer ${{ secrets.COACH_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"coach":"dex"}'
+
+  post-riley:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post Coach Riley message
+        run: |
+          sleep 60
+          curl -s -X POST \
+            "${{ secrets.SUPABASE_FUNCTION_URL }}/post-coach-message" \
+            -H "Authorization: Bearer ${{ secrets.COACH_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"coach":"riley"}'
