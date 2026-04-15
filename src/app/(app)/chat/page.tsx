@@ -220,13 +220,15 @@ export default function ChatPage() {
     }
   }, [showTip])
 
-  function buildContext(currentMessages: Message[]): { role: string; content: string }[] {
+  function buildContext(currentMessages: Message[]): { role: string; content: string; coach_id?: string; had_quick_replies?: boolean }[] {
     return currentMessages
       .slice(-6)
       .filter(m => m.content)
       .map(m => ({
         role: COACH_IDS.has(m.user_id) ? 'assistant' : 'user',
         content: m.content,
+        coach_id: COACH_IDS.has(m.user_id) ? m.user_id : undefined,
+        had_quick_replies: !!(m.quick_replies && m.quick_replies.length > 0),
       }))
   }
 
@@ -273,11 +275,14 @@ export default function ChatPage() {
     localStorage.setItem('nuroni-chat-tip', '1')
   }
 
-  async function sendMessage(text?: string, mediaUrl?: string, mediaType?: string) {
+  async function sendMessage(text?: string, mediaUrl?: string, mediaType?: string, fromPill?: boolean) {
     const content = (text || input).trim()
     if (!content && !mediaUrl) return
     if (sending) return
-    if (!isAdmin && content && isBlocked(content)) {
+
+    // Block @mentions to prevent tagging real users — @coach is the only allowed prefix
+    const atMentionBlocked = !isAdmin && /(?<!^)@(?!coach\b)/i.test(content)
+    if (!isAdmin && content && (isBlocked(content) || atMentionBlocked)) {
       setBlockedNotice(true)
       setTimeout(() => setBlockedNotice(false), 3000)
       return
@@ -303,7 +308,7 @@ export default function ChatPage() {
         fetch('/api/coach', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content, user_id: userId, context }),
+          body: JSON.stringify({ content, user_id: userId, context, from_pill: fromPill || false }),
         }).catch(() => {})
       }
     }
@@ -311,7 +316,7 @@ export default function ChatPage() {
 
   async function handleQuickReply(msgId: string, reply: string) {
     setUsedQuickReplies(prev => new Set(Array.from(prev).concat(msgId)))
-    await sendMessage(reply)
+    await sendMessage(reply, undefined, undefined, true)
   }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -350,7 +355,7 @@ export default function ChatPage() {
   )
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 max-w-lg mx-auto w-full overflow-x-hidden" style={{ height: '100%' }}>
+    <div className="flex flex-col flex-1 min-h-0 max-w-lg mx-auto w-full overflow-x-hidden">
       <div className="flex-shrink-0 px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
         <div>
           <h1 className="text-base font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Fitness Chat</h1>
@@ -576,7 +581,7 @@ export default function ChatPage() {
           <input
             ref={inputRef}
             className="input-base flex-1"
-            placeholder={isAdmin ? 'Send anything...' : 'Ask about workouts, meals, progress...'}
+            placeholder={isAdmin ? 'Send anything...' : 'Chat or type @coach to ask a coach...'}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
@@ -588,7 +593,7 @@ export default function ChatPage() {
             </svg>
           </button>
         </div>
-        {!isAdmin && <p className="text-xs mt-1.5 text-center" style={{ color: 'var(--text-muted)' }}>Fitness topics only · No links, socials, or self-promotion</p>}
+        {!isAdmin && <p className="text-xs mt-1.5 text-center" style={{ color: 'var(--text-muted)' }}>Use @coach to talk to an AI coach · No links or self-promotion</p>}
       </div>
     </div>
   )
