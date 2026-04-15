@@ -146,7 +146,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </header>
 
       {/* Scrollable content area */}
-      <main className={`flex-1 overflow-x-hidden page-enter w-full flex flex-col ${pathname === '/chat' ? 'overflow-hidden' : 'overflow-y-auto pb-20'}`}>
+      <main className={`flex-1 overflow-x-hidden page-enter w-full ${pathname === '/chat' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto pb-6'}`}>
         {children}
       </main>
 
