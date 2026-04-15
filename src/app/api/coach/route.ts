@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 
 const COACH_IDS = new Set([
   '00000000-0000-0000-0000-000000000001',
@@ -37,19 +38,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/coach-reply`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.COACH_SECRET}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        content: strippedContent || content,
-        user_id,
-        context: context || [],
-        locked_coach_id: lockedCoachId,
-      }),
-    })
+    // Use waitUntil so fetch keeps running after response is sent
+    waitUntil(
+      fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/coach-reply`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.COACH_SECRET}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content: strippedContent || content,
+          user_id,
+          context: context || [],
+          locked_coach_id: lockedCoachId,
+        }),
+      })
+    )
 
     return NextResponse.json({ ok: true })
   } catch {
