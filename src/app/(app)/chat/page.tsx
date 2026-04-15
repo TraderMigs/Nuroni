@@ -20,6 +20,7 @@ interface Message {
   is_coach?: boolean
   quick_replies?: string[] | null
   payload?: { photo_id?: string; category?: string } | null
+  reply_to_user_id?: string | null
 }
 
 interface ProfileModal {
@@ -80,14 +81,12 @@ function formatTime(ts: string): string {
   return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
-// Extract category from message — payload first, fallback to content prefix
 function extractProofCategory(msg: Message): string | null {
   if (msg.payload?.category) return msg.payload.category
   if (msg.content?.startsWith('proof_category:')) return msg.content.replace('proof_category:', '').trim()
   return null
 }
 
-// Extract photo_id from message
 function extractPhotoId(msg: Message): string | null {
   if (msg.payload?.photo_id) return msg.payload.photo_id
   return null
@@ -157,7 +156,6 @@ export default function ChatPage() {
   const [heartState, setHeartState] = useState<HeartState>({})
   const [fullscreenPhoto, setFullscreenPhoto] = useState<string | null>(null)
 
-  // Proof of the Day state
   const [canPostProof, setCanPostProof] = useState<boolean | null>(null)
   const [nextAllowedAt, setNextAllowedAt] = useState<string | null>(null)
   const [showCategoryPicker, setShowCategoryPicker] = useState(false)
@@ -221,9 +219,8 @@ export default function ChatPage() {
     setHeartState(prev => ({ ...prev, ...newState }))
   }
 
+  // ── Data loading (auth, profile, messages, proof status) ──────────────────
   useEffect(() => {
-    let cleanup: (() => void) | undefined
-
     async function init() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
@@ -261,7 +258,6 @@ export default function ChatPage() {
         setTimeout(() => loadHeartStates(initialMsgs, user.id), 200)
       }
 
-      // Check proof status
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
       const { data: recent } = await supabase
         .from('proof_photos').select('id, created_at').eq('user_id', user.id)
@@ -274,40 +270,45 @@ export default function ChatPage() {
       } else {
         setCanPostProof(true)
       }
-
-      const channel = supabase
-        .channel('fitness-chat')
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-          const newMsg = payload.new as Message
-          setMessages(prev => {
-            if (prev.find(m => m.id === newMsg.id)) return prev
-            return [...prev, newMsg]
-          })
-          setProfileCache(cache => {
-            if (cache[newMsg.user_id]) {
-              setMessages(prev => prev.map(m => m.id === newMsg.id ? { ...m, ...cache[newMsg.user_id] } : m))
-              return cache
-            }
-            fetchProfiles([newMsg.user_id]).then(newCache => {
-              const merged = { ...cache, ...newCache }
-              setProfileCache(merged)
-              setMessages(prev => prev.map(m => m.id === newMsg.id ? { ...m, ...merged[m.user_id] } : m))
-            })
-            return cache
-          })
-          if (newMsg.media_type === 'proof_photo') {
-            const pid = extractPhotoId(newMsg)
-            if (pid) setHeartState(prev => ({ ...prev, [pid]: { count: 0, hearted: false } }))
-          }
-        })
-        .subscribe()
-
-      cleanup = () => { channel.unsubscribe() }
     }
 
     init()
-    return () => { cleanup?.() }
   }, [supabase, router, fetchProfiles])
+
+  // ── Realtime subscription — separate effect, runs once isPlus is confirmed ─
+  useEffect(() => {
+    if (!isPlus) return
+
+    const channelName = `fitness-chat-${Date.now()}`
+    const channel = supabase
+      .channel(channelName)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+        const newMsg = payload.new as Message
+        setMessages(prev => {
+          if (prev.find(m => m.id === newMsg.id)) return prev
+          return [...prev, newMsg]
+        })
+        setProfileCache(cache => {
+          if (cache[newMsg.user_id]) {
+            setMessages(prev => prev.map(m => m.id === newMsg.id ? { ...m, ...cache[newMsg.user_id] } : m))
+            return cache
+          }
+          fetchProfiles([newMsg.user_id]).then(newCache => {
+            const merged = { ...cache, ...newCache }
+            setProfileCache(merged)
+            setMessages(prev => prev.map(m => m.id === newMsg.id ? { ...m, ...merged[m.user_id] } : m))
+          })
+          return cache
+        })
+        if (newMsg.media_type === 'proof_photo') {
+          const pid = extractPhotoId(newMsg)
+          if (pid) setHeartState(prev => ({ ...prev, [pid]: { count: 0, hearted: false } }))
+        }
+      })
+      .subscribe()
+
+    return () => { channel.unsubscribe() }
+  }, [isPlus, supabase, fetchProfiles])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -509,7 +510,6 @@ export default function ChatPage() {
         <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: 'var(--accent)', color: '#0D1117' }}>Live</span>
       </div>
 
-      {/* Tip: tap names */}
       {showTip && (
         <div className="mx-4 mt-2 px-4 py-3 rounded-xl flex items-center justify-between gap-3 animate-fade-in" style={{ background: 'var(--accent-subtle)', border: '1px solid rgba(45,212,191,0.3)' }}>
           <p className="text-xs" style={{ color: 'var(--accent-text)', lineHeight: 1.5 }}>Tap any name to check their stats and follow their journey.</p>
@@ -519,7 +519,6 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Tip: @coach */}
       {!showTip && showCoachTip && (
         <div className="mx-4 mt-2 px-4 py-3 rounded-xl flex items-center justify-between gap-3 animate-fade-in" style={{ background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.25)' }}>
           <p className="text-xs" style={{ color: '#a78bfa', lineHeight: 1.5 }}>
@@ -549,6 +548,8 @@ export default function ChatPage() {
           const specialty = isCoach ? COACH_SPECIALTIES[msg.user_id] : null
           const hasQuickReplies = isCoach && msg.quick_replies && msg.quick_replies.length > 0 && !usedQuickReplies.has(msg.id)
           const isLastCoachMsg = hasQuickReplies && !messages.slice(i + 1).some(m => COACH_IDS.has(m.user_id))
+          // Pills only active for the user the coach was replying to
+          const pillsAreForMe = !msg.reply_to_user_id || msg.reply_to_user_id === userId
           const isProofPhoto = msg.media_type === 'proof_photo'
           const photoId = extractPhotoId(msg)
           const category = extractProofCategory(msg)
@@ -581,7 +582,6 @@ export default function ChatPage() {
                 </button>
               )}
 
-              {/* Proof Photo */}
               {isProofPhoto && msg.media_url && (
                 <div style={{ maxWidth: '90%', width: '100%' }}>
                   {category && (
@@ -607,7 +607,6 @@ export default function ChatPage() {
                 </div>
               )}
 
-              {/* Regular admin media */}
               {!isProofPhoto && msg.media_url && (
                 <div className="max-w-[80%] mb-1">
                   <img src={msg.media_url} alt="shared media" style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: 12, display: 'block' }} />
@@ -632,13 +631,31 @@ export default function ChatPage() {
               {isLastCoachMsg && (
                 <div className="flex flex-wrap gap-1.5 mt-2 max-w-[85%]">
                   {msg.quick_replies!.map((reply, ri) => (
-                    <button key={ri} onClick={() => handleQuickReply(msg.id, reply)} disabled={sending} className="text-xs px-3 py-1.5 rounded-full font-medium transition-all" style={{ background: 'rgba(167,139,250,0.1)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.35)', cursor: 'pointer' }}>
+                    <button
+                      key={ri}
+                      onClick={() => pillsAreForMe ? handleQuickReply(msg.id, reply) : undefined}
+                      disabled={sending || !pillsAreForMe}
+                      className="text-xs px-3 py-1.5 rounded-full font-medium transition-all"
+                      style={{
+                        background: pillsAreForMe ? 'rgba(167,139,250,0.1)' : 'var(--bg-input)',
+                        color: pillsAreForMe ? '#a78bfa' : 'var(--text-muted)',
+                        border: pillsAreForMe ? '1px solid rgba(167,139,250,0.35)' : '1px solid var(--border)',
+                        cursor: pillsAreForMe ? 'pointer' : 'default',
+                        opacity: pillsAreForMe ? 1 : 0.4,
+                      }}
+                    >
                       {reply}
                     </button>
                   ))}
-                  <button onClick={() => setUsedQuickReplies(prev => new Set(Array.from(prev).concat(msg.id)))} className="text-xs px-3 py-1.5 rounded-full font-medium transition-all" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border)', cursor: 'pointer' }}>
-                    Other...
-                  </button>
+                  {pillsAreForMe && (
+                    <button
+                      onClick={() => setUsedQuickReplies(prev => new Set(Array.from(prev).concat(msg.id)))}
+                      className="text-xs px-3 py-1.5 rounded-full font-medium transition-all"
+                      style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border)', cursor: 'pointer' }}
+                    >
+                      Other...
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -649,7 +666,6 @@ export default function ChatPage() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Profile modal */}
       {profileModal && (
         <div className="fixed inset-0 z-50 flex items-end justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={() => setProfileModal(null)}>
           <div className="card w-full max-w-sm p-5 animate-fade-in" onClick={e => e.stopPropagation()}>
@@ -675,7 +691,6 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Category picker */}
       {showCategoryPicker && (
         <div className="fixed inset-0 z-50 flex items-end justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }} onClick={() => setShowCategoryPicker(false)}>
           <div className="card w-full max-w-sm p-5 animate-fade-in" onClick={e => e.stopPropagation()}>
@@ -692,7 +707,6 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Fullscreen photo */}
       {fullscreenPhoto && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.92)' }} onClick={() => setFullscreenPhoto(null)}>
           <button onClick={() => setFullscreenPhoto(null)} style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'white' }}>
@@ -720,7 +734,6 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Countdown bar — shown when user can't post yet */}
       {canPostProof === false && countdown && (
         <div className="mx-4 mb-1 px-3 py-2 rounded-xl text-xs text-center" style={{ background: 'rgba(45,212,191,0.06)', color: 'var(--text-muted)', border: '1px solid rgba(45,212,191,0.15)' }}>
           Next Proof of the Day in <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{countdown}</span>
