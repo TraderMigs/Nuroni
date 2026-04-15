@@ -350,7 +350,7 @@ export default function ChatPage() {
   )
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 max-w-lg mx-auto w-full overflow-x-hidden">
+    <div className="flex flex-col flex-1 min-h-0 max-w-lg mx-auto w-full overflow-x-hidden" style={{ height: '100%' }}>
       <div className="flex-shrink-0 px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
         <div>
           <h1 className="text-base font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Fitness Chat</h1>
