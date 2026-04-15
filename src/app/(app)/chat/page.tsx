@@ -81,6 +81,12 @@ const BLOCKED_PATTERNS = [
   /my program|my plan|my course|my coaching|my page|my channel/i,
 ]
 
+// Safe merge — never overwrite media fields with profile cache
+function mergeProfile(msg: Message, profile: Partial<Message> | undefined): Message {
+  if (!profile) return msg
+  return { ...msg, display_name: profile.display_name ?? msg.display_name, username: profile.username ?? msg.username, weight_unit: profile.weight_unit ?? msg.weight_unit, start_weight: profile.start_weight ?? msg.start_weight, current_weight: profile.current_weight ?? msg.current_weight, is_admin: profile.is_admin ?? msg.is_admin, is_coach: profile.is_coach ?? msg.is_coach }
+}
+
 function isBlocked(text: string): boolean {
   return BLOCKED_PATTERNS.some(p => p.test(text))
 }
@@ -270,7 +276,7 @@ export default function ChatPage() {
         const ids = Array.from(new Set(initialMsgs.map(m => m.user_id)))
         fetchProfiles(ids).then(cache => {
           setProfileCache(cache)
-          setMessages(prev => prev.map(m => ({ ...m, ...cache[m.user_id] })))
+          setMessages(prev => prev.map(m => mergeProfile(m, cache[m.user_id])))
         })
         setTimeout(() => loadHeartStates(initialMsgs, user.id), 200)
       }
@@ -307,13 +313,13 @@ export default function ChatPage() {
         })
         setProfileCache(cache => {
           if (cache[newMsg.user_id]) {
-            setMessages(prev => prev.map(m => m.id === newMsg.id ? { ...m, ...cache[newMsg.user_id] } : m))
+            setMessages(prev => prev.map(m => m.id === newMsg.id ? mergeProfile(m, cache[newMsg.user_id]) : m))
             return cache
           }
           fetchProfiles([newMsg.user_id]).then(newCache => {
             const merged = { ...cache, ...newCache }
             setProfileCache(merged)
-            setMessages(prev => prev.map(m => m.id === newMsg.id ? { ...m, ...merged[m.user_id] } : m))
+            setMessages(prev => prev.map(m => m.id === newMsg.id ? mergeProfile(m, merged[m.user_id]) : m))
           })
           return cache
         })
@@ -462,7 +468,7 @@ export default function ChatPage() {
       setMessages(prev => prev.filter(m => m.id !== tempId))
       if (!text && !mediaUrl) setInput(content)
     } else if (data) {
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...data, ...profileCache[userId] } : m))
+      setMessages(prev => prev.map(m => m.id === tempId ? mergeProfile(data, profileCache[userId]) : m))
       const isAtCoach = content.toLowerCase().startsWith('@coach')
       const shouldFireCoach = isAtCoach || fromPill || !!activeCoachId
       if (content && shouldFireCoach) {
@@ -496,7 +502,7 @@ export default function ChatPage() {
       const optimistic: Message = { id: tempId, user_id: userId, content: '', media_url: data.url, media_type: data.mediaType, created_at: new Date().toISOString(), ...profileCache[userId] }
       setMessages(prev => [...prev, optimistic])
       const { data: msgData, error } = await supabase.from('messages').insert({ user_id: userId, content: '', media_url: data.url, media_type: data.mediaType }).select().maybeSingle()
-      if (!error && msgData) setMessages(prev => prev.map(m => m.id === tempId ? { ...msgData, ...profileCache[userId] } : m))
+      if (!error && msgData) setMessages(prev => prev.map(m => m.id === tempId ? mergeProfile(msgData, profileCache[userId]) : m))
     }
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
