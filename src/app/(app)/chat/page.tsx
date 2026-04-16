@@ -267,9 +267,9 @@ export default function ChatPage() {
       setFollowedIds(new Set(Array.from(follows?.map(f => f.following_id) || [])))
 
       const { data: msgs } = await supabase
-        .from('messages').select('*').order('created_at', { ascending: true }).limit(50)
+        .from('messages').select('*').order('created_at', { ascending: false }).limit(100)
 
-      const initialMsgs = msgs || []
+      const initialMsgs = (msgs || []).reverse()
       setMessages(initialMsgs)
 
       if (initialMsgs.length > 0) {
@@ -614,7 +614,10 @@ export default function ChatPage() {
           const lostSoFar = msg.start_weight && msg.current_weight ? parseFloat((msg.start_weight - msg.current_weight).toFixed(1)) : null
           const specialty = isCoach ? COACH_SPECIALTIES[msg.user_id] : null
           const hasQuickReplies = isCoach && msg.quick_replies && msg.quick_replies.length > 0 && !usedQuickReplies.has(msg.id)
-          const isLastCoachMsg = hasQuickReplies && !messages.slice(i + 1).some(m => COACH_IDS.has(m.user_id))
+          // Only suppress pills if a later coach message is directed at the same user (not a reply to someone else)
+          const isLastCoachMsg = hasQuickReplies && !messages.slice(i + 1).some(m =>
+            COACH_IDS.has(m.user_id) && (!m.reply_to_user_id || m.reply_to_user_id === userId)
+          )
           // Pills only active for the user the coach was replying to
           const pillsAreForMe = !msg.reply_to_user_id || msg.reply_to_user_id === userId
           // Broadcast = coach message with no reply_to_user_id and no quick_replies — show reply button
