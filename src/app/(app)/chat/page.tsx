@@ -617,6 +617,9 @@ export default function ChatPage() {
           const isLastCoachMsg = hasQuickReplies && !messages.slice(i + 1).some(m => COACH_IDS.has(m.user_id))
           // Pills only active for the user the coach was replying to
           const pillsAreForMe = !msg.reply_to_user_id || msg.reply_to_user_id === userId
+          // Broadcast = coach message with no reply_to_user_id and no quick_replies — show reply button
+          const isBroadcast = isCoach && !msg.reply_to_user_id && !msg.quick_replies && !!msg.content
+          const isLastBroadcast = isBroadcast && !messages.slice(i + 1).some(m => COACH_IDS.has(m.user_id) && !m.reply_to_user_id && !m.quick_replies)
           const isProofPhoto = msg.media_type === 'proof_photo'
           const photoId = extractPhotoId(msg)
           const category = extractProofCategory(msg)
@@ -729,6 +732,29 @@ export default function ChatPage() {
                     </button>
                   )}
                 </div>
+              )}
+
+              {/* Reply button for broadcast coach messages */}
+              {isLastBroadcast && activeCoachId !== msg.user_id && (
+                <button
+                  onClick={() => {
+                    setActiveCoachId(msg.user_id)
+                    setLastUserMsgAt(Date.now())
+                    setShowCoachKeepPrompt(false)
+                    const coachName = COACH_NAMES[msg.user_id] || 'the coach'
+                    setOtherHint(`Replying to ${coachName}...`)
+                    setTimeout(() => inputRef.current?.focus(), 50)
+                  }}
+                  className="mt-1.5 text-xs px-3 py-1.5 rounded-full font-medium transition-all"
+                  style={{
+                    background: 'rgba(167,139,250,0.08)',
+                    color: '#a78bfa',
+                    border: '1px solid rgba(167,139,250,0.2)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Reply to {COACH_NAMES[msg.user_id] || 'Coach'}
+                </button>
               )}
 
               <span className="text-xs mt-0.5 mx-1" style={{ color: 'var(--text-muted)' }}>{formatTime(msg.created_at)}</span>
