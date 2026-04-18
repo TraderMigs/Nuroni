@@ -184,6 +184,7 @@ export default function ChatPage() {
   const [todayProofs, setTodayProofs] = useState<{ id: string; photo_url: string; category: string; user_id: string; display_name?: string }[]>([])
   const [todayProofsExpanded, setTodayProofsExpanded] = useState(false)
   const [fullscreenTodayPhoto, setFullscreenTodayPhoto] = useState<string | null>(null)
+  const [coachDayDismissed, setCoachDayDismissed] = useState(false)
   const [showCategoryPicker, setShowCategoryPicker] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [proofToast, setProofToast] = useState('')
@@ -280,6 +281,10 @@ export default function ChatPage() {
 
         const coachTipSeen = localStorage.getItem('nuroni-coach-tip')
         if (!coachTipSeen) setShowCoachTip(true)
+
+        const todayKey = new Date().toDateString()
+        const coachDayKey = localStorage.getItem('nuroni-coach-day-dismissed')
+        if (coachDayKey === todayKey) setCoachDayDismissed(true)
 
         const { data: follows } = await supabase
           .from('follows').select('following_id').eq('follower_id', user.id)
@@ -671,28 +676,41 @@ export default function ChatPage() {
       )}
 
       {/* Coach of the Day */}
-      <div className="mx-4 mt-2 px-3 py-2.5 rounded-xl flex items-center justify-between gap-3" style={{ background: 'rgba(167,139,250,0.06)', border: '1px solid rgba(167,139,250,0.15)' }}>
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm">⭐</span>
-          <p className="text-xs" style={{ color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-            <span style={{ color: '#a78bfa', fontWeight: 600 }}>Coach of the day: {coachOfDayName}</span>
-            <span style={{ color: 'var(--text-muted)' }}> · {coachOfDaySpecialty}</span>
-          </p>
+      {!coachDayDismissed && (
+        <div className="mx-4 mt-2 px-3 py-2.5 rounded-xl flex items-center justify-between gap-3" style={{ background: 'rgba(167,139,250,0.06)', border: '1px solid rgba(167,139,250,0.15)' }}>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-sm">⭐</span>
+            <p className="text-xs" style={{ color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+              <span style={{ color: '#a78bfa', fontWeight: 600 }}>Coach of the day: {coachOfDayName}</span>
+              <span style={{ color: 'var(--text-muted)' }}> · {coachOfDaySpecialty}</span>
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <button
+              onClick={() => {
+                setActiveCoachId(coachOfDayId)
+                setLastUserMsgAt(Date.now())
+                setShowCoachKeepPrompt(false)
+                setOtherHint(`Chatting with ${coachOfDayName}...`)
+                setTimeout(() => inputRef.current?.focus(), 50)
+              }}
+              className="text-xs px-2.5 py-1 rounded-lg font-semibold"
+              style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.3)', cursor: 'pointer' }}
+            >
+              Ask
+            </button>
+            <button
+              onClick={() => {
+                setCoachDayDismissed(true)
+                localStorage.setItem('nuroni-coach-day-dismissed', new Date().toDateString())
+              }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, display: 'flex', alignItems: 'center' }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
         </div>
-        <button
-          onClick={() => {
-            setActiveCoachId(coachOfDayId)
-            setLastUserMsgAt(Date.now())
-            setShowCoachKeepPrompt(false)
-            setOtherHint(`Chatting with ${coachOfDayName}...`)
-            setTimeout(() => inputRef.current?.focus(), 50)
-          }}
-          className="text-xs px-2.5 py-1 rounded-lg font-semibold flex-shrink-0"
-          style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.3)', cursor: 'pointer' }}
-        >
-          Ask
-        </button>
-      </div>
+      )}
 
       {/* Today's Proofs strip — always visible */}
       <div className="mt-2">
