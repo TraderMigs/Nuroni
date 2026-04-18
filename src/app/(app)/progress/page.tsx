@@ -137,6 +137,16 @@ export default function ProgressPage() {
   const [stepsInput, setStepsInput] = useState('')
   const [distanceInput, setDistanceInput] = useState('')
 
+  // Edit entry state
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editWeight, setEditWeight] = useState('')
+  const [editSteps, setEditSteps] = useState('')
+  const [editNote, setEditNote] = useState('')
+  const [editActivities, setEditActivities] = useState<string[]>([])
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
+
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/login'); return }
@@ -193,6 +203,49 @@ export default function ProgressPage() {
       await load()
     }
     setSaving(false)
+  }
+
+  function startEdit(entry: Entry) {
+    setEditingId(entry.id)
+    setEditWeight(String(entry.weight))
+    setEditSteps(String(entry.steps || ''))
+    setEditNote(entry.note || '')
+    setEditActivities(entry.activities || [])
+    setShowDeleteConfirm(null)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setShowDeleteConfirm(null)
+  }
+
+  async function saveEdit(entryId: string) {
+    if (!editWeight) return
+    setSavingEdit(true)
+    const { error } = await supabase.from('entries').update({
+      weight: parseFloat(editWeight),
+      steps: editSteps ? parseInt(editSteps) : 0,
+      note: editNote || null,
+      activities: editActivities.length > 0 ? editActivities : null,
+    }).eq('id', entryId)
+    if (!error) {
+      setToast('Entry updated!')
+      setEditingId(null)
+      await load()
+    }
+    setSavingEdit(false)
+  }
+
+  async function deleteEntry(entryId: string) {
+    setDeletingId(entryId)
+    const { error } = await supabase.from('entries').delete().eq('id', entryId)
+    if (!error) {
+      setToast('Entry deleted')
+      setEditingId(null)
+      setShowDeleteConfirm(null)
+      await load()
+    }
+    setDeletingId(null)
   }
 
   async function copyLink() {
@@ -579,10 +632,15 @@ export default function ProgressPage() {
       {entries.length > 0 && (
         <div className="card p-4">
           <h2 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>History</h2>
-          <div className="space-y-2">
+          <div className="space-y-1">
             {entries.slice(0, 10).map((entry, i) => (
-              <div key={entry.id} className="py-2 border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
-                <div className="flex items-center justify-between">
+              <div key={entry.id} className="rounded-xl overflow-hidden" style={{ border: editingId === entry.id ? '1px solid var(--accent)' : '1px solid transparent' }}>
+                {/* Row */}
+                <button
+                  className="w-full py-2.5 px-1 flex items-center justify-between text-left"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
+                  onClick={() => editingId === entry.id ? cancelEdit() : startEdit(entry)}
+                >
                   <div className="flex items-center gap-2 min-w-0">
                     {i === 0 && <span className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>Latest</span>}
                     <span className="text-sm truncate" style={{ color: 'var(--text-secondary)' }}>
@@ -592,9 +650,97 @@ export default function ProgressPage() {
                   <div className="flex items-center gap-3 text-sm flex-shrink-0">
                     <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{entry.weight} {unit}</span>
                     {entry.steps > 0 && <span style={{ color: 'var(--text-muted)' }}>{entry.steps.toLocaleString()}</span>}
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--text-muted)', transform: editingId === entry.id ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0 }}>
+                      <polyline points="6 9 12 15 18 9"/>
+                    </svg>
                   </div>
-                </div>
-                {entry.note && <p className="text-xs mt-1" style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>&ldquo;{entry.note}&rdquo;</p>}
+                </button>
+
+                {/* Edit panel */}
+                {editingId === entry.id && (
+                  <div className="px-1 pt-3 pb-2 space-y-3 animate-fade-in">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="label">Weight ({unit})</label>
+                        <input className="input-base" type="number" step="0.1" value={editWeight} onChange={e => setEditWeight(e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="label">Steps</label>
+                        <input className="input-base" type="number" value={editSteps} onChange={e => setEditSteps(e.target.value)} />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="label">Note <span style={{ color: 'var(--text-muted)' }}>(optional)</span></label>
+                      <input className="input-base" placeholder="How were you feeling?" value={editNote} onChange={e => setEditNote(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="label">Activities</label>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {ACTIVITY_OPTIONS.map(a => {
+                          const active = editActivities.includes(a)
+                          return (
+                            <button
+                              key={a}
+                              type="button"
+                              onClick={() => setEditActivities(prev => active ? prev.filter(x => x !== a) : [...prev, a])}
+                              className="px-2.5 py-1 rounded-full text-xs font-medium transition-all"
+                              style={{
+                                background: active ? 'var(--accent)' : 'var(--bg-input)',
+                                color: active ? '#0D1117' : 'var(--text-secondary)',
+                                border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                              }}
+                            >
+                              {a}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Delete confirm */}
+                    {showDeleteConfirm === entry.id ? (
+                      <div className="rounded-xl p-3 space-y-2" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                        <p className="text-xs font-medium" style={{ color: 'var(--danger)' }}>Delete this entry? This cannot be undone.</p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => deleteEntry(entry.id)}
+                            disabled={deletingId === entry.id}
+                            className="flex-1 py-1.5 rounded-lg text-xs font-semibold"
+                            style={{ background: 'var(--danger)', color: 'white', border: 'none', cursor: 'pointer' }}
+                          >
+                            {deletingId === entry.id ? 'Deleting...' : 'Yes, delete'}
+                          </button>
+                          <button
+                            onClick={() => setShowDeleteConfirm(null)}
+                            className="flex-1 py-1.5 rounded-lg text-xs font-semibold btn-secondary"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => saveEdit(entry.id)}
+                          disabled={savingEdit || !editWeight}
+                          className="flex-1 btn-primary py-2 text-xs"
+                        >
+                          {savingEdit ? 'Saving...' : 'Save changes'}
+                        </button>
+                        <button
+                          onClick={() => setShowDeleteConfirm(entry.id)}
+                          className="py-2 px-3 rounded-xl text-xs font-semibold"
+                          style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.15)', cursor: 'pointer' }}
+                        >
+                          Delete
+                        </button>
+                        <button onClick={cancelEdit} className="py-2 px-3 rounded-xl text-xs font-semibold btn-secondary">
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
