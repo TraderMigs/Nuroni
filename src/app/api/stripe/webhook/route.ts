@@ -71,15 +71,6 @@ export async function POST(req: NextRequest) {
         p_stripe_customer_id: customerId,
         p_stripe_subscription_id: subId,
       })
-
-      // Trigger referral reward — non-blocking, won't fail the webhook
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://www.nuroni.app'
-      fetch(`${appUrl}/api/referral/convert`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId }),
-      }).catch(() => {})
-
       break
     }
 
@@ -110,10 +101,27 @@ export async function POST(req: NextRequest) {
           p_stripe_customer_id: customerId,
           p_stripe_subscription_id: sub.id,
         })
+        // Store trial end date if trialing
+        if (sub.status === 'trialing' && sub.trial_end) {
+          await supabaseAdmin
+            .from('profiles')
+            .update({ trial_ends_at: new Date(sub.trial_end * 1000).toISOString() })
+            .eq('id', userId)
+        } else if (sub.status === 'active') {
+          // Clear trial date when fully active
+          await supabaseAdmin
+            .from('profiles')
+            .update({ trial_ends_at: null })
+            .eq('id', userId)
+        }
       } else {
         await supabaseAdmin.rpc('revoke_plus_from_user', {
           p_user_id: userId,
         })
+        await supabaseAdmin
+          .from('profiles')
+          .update({ trial_ends_at: null })
+          .eq('id', userId)
       }
       break
     }
