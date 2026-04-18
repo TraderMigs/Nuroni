@@ -210,21 +210,13 @@ export default function ProgressPage() {
     if (lifetimeFact || lifetimeFactLoading) return
     setLifetimeFactLoading(true)
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch('/api/steps-fact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5',
-          max_tokens: 120,
-          messages: [{
-            role: 'user',
-            content: `I have walked ${totalSteps.toLocaleString()} steps total. Give me ONE fun, real-world distance comparison — like "you could have walked from NYC to Philadelphia" or "that's the length of the Great Wall of China 0.4 times". Use real, accurate distances. Keep it to 1 sentence, enthusiastic, no markdown.`
-          }]
-        })
+        body: JSON.stringify({ total_steps: totalSteps }),
       })
       const data = await res.json()
-      const text = data.content?.[0]?.text?.trim()
-      if (text) setLifetimeFact(text)
+      if (data.fact) setLifetimeFact(data.fact)
     } catch { setLifetimeFact('Keep walking — every step adds up!') }
     setLifetimeFactLoading(false)
   }
