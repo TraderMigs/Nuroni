@@ -184,9 +184,6 @@ export default function ChatPage() {
   const [todayProofs, setTodayProofs] = useState<{ id: string; photo_url: string; category: string; user_id: string; display_name?: string }[]>([])
   const [todayProofsExpanded, setTodayProofsExpanded] = useState(false)
   const [fullscreenTodayPhoto, setFullscreenTodayPhoto] = useState<string | null>(null)
-  const [leaderboardExpanded, setLeaderboardExpanded] = useState(false)
-  const [leaderboard, setLeaderboard] = useState<{ id: string; display_name: string; username: string; weekly_steps: number; streak: number }[]>([])
-  const [leaderboardLoading, setLeaderboardLoading] = useState(false)
   const [showCategoryPicker, setShowCategoryPicker] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [proofToast, setProofToast] = useState('')
@@ -273,19 +270,21 @@ export default function ChatPage() {
       const { data: profile } = await supabase
         .from('profiles').select('is_plus, is_admin').eq('id', user.id).maybeSingle()
 
-      if (!profile?.is_plus) { setIsPlus(false); return }
-      setIsPlus(true)
+      const userIsPlus = profile?.is_plus || false
+      setIsPlus(userIsPlus)
       setIsAdmin(profile?.is_admin || false)
 
-      const tipSeen = localStorage.getItem('nuroni-chat-tip')
-      if (!tipSeen) setShowTip(true)
+      if (userIsPlus) {
+        const tipSeen = localStorage.getItem('nuroni-chat-tip')
+        if (!tipSeen) setShowTip(true)
 
-      const coachTipSeen = localStorage.getItem('nuroni-coach-tip')
-      if (!coachTipSeen) setShowCoachTip(true)
+        const coachTipSeen = localStorage.getItem('nuroni-coach-tip')
+        if (!coachTipSeen) setShowCoachTip(true)
 
-      const { data: follows } = await supabase
-        .from('follows').select('following_id').eq('follower_id', user.id)
-      setFollowedIds(new Set(Array.from(follows?.map(f => f.following_id) || [])))
+        const { data: follows } = await supabase
+          .from('follows').select('following_id').eq('follower_id', user.id)
+        setFollowedIds(new Set(Array.from(follows?.map(f => f.following_id) || [])))
+      }
 
       const { data: msgs } = await supabase
         .from('messages').select('*').order('created_at', { ascending: false }).limit(100)
@@ -467,78 +466,6 @@ export default function ChatPage() {
     setFollowLoading(false)
   }
 
-  async function loadLeaderboard() {
-    if (leaderboardLoading || leaderboard.length > 0) return
-    setLeaderboardLoading(true)
-    try {
-      const cutoff = new Date(Date.now() - 7 * 86400000).toISOString()
-      const { data: opted } = await supabase
-        .from('profiles')
-        .select('id, display_name, username')
-        .eq('leaderboard_opt_in', true)
-        .eq('is_coach', false)
-        .limit(50)
-
-      if (!opted || opted.length === 0) { setLeaderboardLoading(false); return }
-
-      const ids = opted.map((u: { id: string }) => u.id)
-      const { data: weekEntries } = await supabase
-        .from('entries')
-        .select('user_id, steps')
-        .in('user_id', ids)
-        .gte('created_at', cutoff)
-
-      const { data: allEntries } = await supabase
-        .from('entries')
-        .select('user_id, created_at')
-        .in('user_id', ids)
-        .order('created_at', { ascending: false })
-        .limit(500)
-
-      const stepMap: Record<string, number> = {}
-      weekEntries?.forEach((e: { user_id: string; steps: number }) => {
-        stepMap[e.user_id] = (stepMap[e.user_id] || 0) + (e.steps || 0)
-      })
-
-      const computeStreakLocal = (userEntries: { created_at: string }[]): number => {
-        if (!userEntries.length) return 0
-        const days = Array.from(new Set(userEntries.map(e => new Date(e.created_at).toDateString())))
-        const today = new Date().toDateString()
-        const yesterday = new Date(Date.now() - 86400000).toDateString()
-        if (days[0] !== today && days[0] !== yesterday) return 0
-        let streak = 1
-        for (let i = 1; i < days.length; i++) {
-          const prev = new Date(days[i - 1]).getTime()
-          const curr = new Date(days[i]).getTime()
-          if (Math.round((prev - curr) / 86400000) === 1) streak++
-          else break
-        }
-        return streak
-      }
-
-      const entriesByUser: Record<string, { created_at: string }[]> = {}
-      allEntries?.forEach((e: { user_id: string; created_at: string }) => {
-        if (!entriesByUser[e.user_id]) entriesByUser[e.user_id] = []
-        entriesByUser[e.user_id].push(e)
-      })
-
-      const ranked = opted
-        .map((u: { id: string; display_name: string; username: string }) => ({
-          id: u.id,
-          display_name: u.display_name || u.username || 'Member',
-          username: u.username || '',
-          weekly_steps: stepMap[u.id] || 0,
-          streak: computeStreakLocal(entriesByUser[u.id] || []),
-        }))
-        .filter((u: { weekly_steps: number }) => u.weekly_steps > 0)
-        .sort((a: { weekly_steps: number }, b: { weekly_steps: number }) => b.weekly_steps - a.weekly_steps)
-        .slice(0, 25)
-
-      setLeaderboard(ranked)
-    } catch {}
-    setLeaderboardLoading(false)
-  }
-
   function dismissTip() { setShowTip(false); localStorage.setItem('nuroni-chat-tip', '1') }
   function dismissCoachTip() { setShowCoachTip(false); localStorage.setItem('nuroni-coach-tip', '1') }
 
@@ -667,14 +594,7 @@ export default function ChatPage() {
     if (proofFileInputRef.current) proofFileInputRef.current.value = ''
   }
 
-  if (isPlus === false) return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 text-center">
-      <div className="text-4xl mb-4">💬</div>
-      <h2 className="text-lg font-bold mb-2" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Fitness Chat</h2>
-      <p className="text-sm mb-5" style={{ color: 'var(--text-secondary)', maxWidth: 280 }}>Real conversations with real people on real journeys. Plus+ exclusive.</p>
-      <button onClick={() => router.push('/plus')} className="btn-primary">Upgrade to Plus+</button>
-    </div>
-  )
+  // Non-Plus users see the chat behind an overlay — handled inline below
 
   if (isPlus === null) return (
     <div className="flex items-center justify-center min-h-screen">
@@ -683,7 +603,47 @@ export default function ChatPage() {
   )
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 max-w-lg mx-auto w-full overflow-x-hidden">
+    <div className="flex flex-col flex-1 min-h-0 max-w-lg mx-auto w-full overflow-x-hidden" style={{ position: 'relative' }}>
+
+      {/* Paywall overlay for non-Plus users */}
+      {isPlus === false && (
+        <div
+          className="absolute inset-0 z-50 flex items-center justify-center p-6"
+          style={{
+            backdropFilter: 'blur(6px)',
+            WebkitBackdropFilter: 'blur(6px)',
+            background: 'rgba(13,17,23,0.75)',
+          }}
+        >
+          <div
+            className="card p-6 w-full max-w-sm text-center animate-fade-in"
+            style={{ border: '1.5px solid var(--accent)', background: 'var(--bg-card)' }}
+          >
+            <div className="text-3xl mb-3">💬</div>
+            <h2 className="text-base font-bold mb-2" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+              Join the conversation
+            </h2>
+            <p className="text-xs mb-1" style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+              Real people. Real journeys. 5 AI coaches who know you by name.
+            </p>
+            <p className="text-xs mb-5" style={{ color: 'var(--text-muted)' }}>
+              All of this — plus your journal, leaderboard, and proof photos — included in your trial.
+            </p>
+            <button
+              onClick={() => router.push('/plus')}
+              className="btn-primary w-full mb-3"
+            >
+              Start 7-day free trial →
+            </button>
+            <button
+              onClick={() => router.push('/progress')}
+              className="btn-secondary w-full text-sm"
+            >
+              Back to progress
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex-shrink-0 px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
         <div>
           <h1 className="text-base font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Fitness Chat</h1>
@@ -799,79 +759,6 @@ export default function ChatPage() {
           <img src={fullscreenTodayPhoto} alt="Proof" style={{ maxWidth: '95vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 12 }} onClick={e => e.stopPropagation()} />
         </div>
       )}
-
-      {/* Weekly Leaderboard */}
-      <div className="mt-1">
-        <button
-          onClick={() => {
-            setLeaderboardExpanded(v => !v)
-            if (!leaderboardExpanded) loadLeaderboard()
-          }}
-          className="w-full px-4 py-2 flex items-center justify-between"
-          style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-        >
-          <p className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-            🏆 This Week&apos;s Top Walkers
-            {leaderboard.length > 0 && (
-              <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs" style={{ background: 'rgba(45,212,191,0.12)', color: 'var(--accent-text)' }}>
-                {leaderboard.length}
-              </span>
-            )}
-          </p>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', transform: leaderboardExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-        </button>
-        {leaderboardExpanded && (
-          <div className="px-4 pb-2 animate-fade-in">
-            {leaderboardLoading ? (
-              <div className="flex items-center gap-2 py-2">
-                <div className="w-4 h-4 border-2 rounded-full animate-spin flex-shrink-0" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
-                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading leaderboard…</p>
-              </div>
-            ) : leaderboard.length === 0 ? (
-              <div className="py-2">
-                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  No one on the leaderboard yet. Opt in via <strong style={{ color: 'var(--text-secondary)' }}>Profile → Settings</strong> and log your steps to appear here.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                {leaderboard.map((user, idx) => (
-                  <a
-                    key={user.id}
-                    href={`/u/${user.username}`}
-                    style={{ textDecoration: 'none', display: 'block' }}
-                  >
-                    <div
-                      className="flex items-center gap-3 px-3 py-2 rounded-xl transition-all"
-                      style={{
-                        background: idx === 0 ? 'rgba(255,215,0,0.06)' : idx === 1 ? 'rgba(192,192,192,0.06)' : idx === 2 ? 'rgba(205,127,50,0.06)' : 'var(--bg-input)',
-                        border: `1px solid ${idx === 0 ? 'rgba(255,215,0,0.2)' : idx === 1 ? 'rgba(192,192,192,0.15)' : idx === 2 ? 'rgba(205,127,50,0.15)' : 'var(--border)'}`,
-                      }}
-                    >
-                      <span className="text-sm font-bold flex-shrink-0 w-5 text-center" style={{ color: idx === 0 ? '#FFD700' : idx === 1 ? '#C0C0C0' : idx === 2 ? '#CD7F32' : 'var(--text-muted)' }}>
-                        {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}`}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{user.display_name}</p>
-                        {user.streak > 0 && (
-                          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                            {user.streak >= 7 ? '🔥' : user.streak >= 3 ? '⚡' : '📅'} {user.streak}d streak
-                          </p>
-                        )}
-                      </div>
-                      <p className="text-xs font-bold flex-shrink-0" style={{ color: 'var(--accent)' }}>
-                        {user.weekly_steps.toLocaleString()} steps
-                      </p>
-                    </div>
-                  </a>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {messages.length === 0 && (
