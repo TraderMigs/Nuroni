@@ -383,7 +383,7 @@ export default function ProgressPage() {
 
       <div className="grid grid-cols-2 gap-3">
         <div className="stat-card flex items-center gap-3">
-          <div className="text-2xl">{streak >= 7 ? 'fire' : streak >= 3 ? 'bolt' : 'cal'}</div>
+          <div className="text-2xl">{streak >= 7 ? '🔥' : streak >= 3 ? '⚡' : '📅'}</div>
           <div>
             <div className="stat-value" style={{ fontSize: '1.5rem' }}>{streak}</div>
             <div className="stat-label">Day streak</div>
@@ -558,7 +558,7 @@ export default function ProgressPage() {
                 itemStyle={{ color: 'var(--accent)' }}
               />
               <Line type="monotone" dataKey="weight" stroke="var(--accent)" strokeWidth={2} dot={{ r: 3, fill: 'var(--accent)' }} activeDot={{ r: 5 }} />
-              {isPlus && <Line type="monotone" dataKey="trend" stroke="rgba(45,212,191,0.4)" strokeWidth={1.5} strokeDasharray="4 2" dot={false} />}
+              {isPlus && <Line type="monotone" dataKey="trend" stroke="rgba(45,212,191,0.7)" strokeWidth={2} strokeDasharray="5 3" dot={false} name="Trend" />}
               <ReferenceLine y={goal.goal_weight} stroke="var(--success)" strokeDasharray="3 3" strokeWidth={1} />
             </LineChart>
           </ResponsiveContainer>
@@ -602,8 +602,17 @@ export default function ProgressPage() {
       )}
 
       {entries.length === 0 && (
-        <div className="text-center py-8" style={{ color: 'var(--text-muted)' }}>
-          <p className="text-sm">Log your first entry above to get started.</p>
+        <div className="card p-5 text-center" style={{ border: '1px dashed rgba(45,212,191,0.3)' }}>
+          <div className="text-3xl mb-3">👟</div>
+          <p className="text-sm font-semibold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+            Your journey starts here
+          </p>
+          <p className="text-xs mb-3" style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            Log your first weight and steps above. Even one entry starts your streak and unlocks your progress chart.
+          </p>
+          <p className="text-xs" style={{ color: 'var(--accent-text)' }}>
+            Most members see results within their first 2 weeks of daily logging.
+          </p>
         </div>
       )}
 
