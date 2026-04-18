@@ -35,6 +35,10 @@ export async function POST(req: NextRequest) {
       payment_method_types: ['card'],
       mode: 'subscription',
       line_items: [{ price: process.env.STRIPE_PRICE_ID!, quantity: 1 }],
+      subscription_data: {
+        trial_period_days: 7,
+        metadata: { supabase_user_id: user.id },
+      },
       success_url: `${origin}/plus/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/plus`,
       metadata: { supabase_user_id: user.id },
