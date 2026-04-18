@@ -44,6 +44,7 @@ export default function ProfilePage() {
   const [proofPhotosPublic, setProofPhotosPublic] = useState(true)
   const [referralCode, setReferralCode] = useState('')
   const [referralToast, setReferralToast] = useState('')
+  const [referralEnabled, setReferralEnabled] = useState(false)
 
   // Proof photos state
   const [proofPhotos, setProofPhotos] = useState<ProofPhoto[]>([])
@@ -73,6 +74,9 @@ export default function ProfilePage() {
       setIsAdmin(p.is_admin || false)
       setProofPhotosPublic(p.proof_photos_public ?? true)
       setReferralCode(p.referral_code || '')
+      // Load app settings for referral visibility
+      const { data: appSettings } = await supabase.from('app_settings').select('referral_enabled').eq('id', 1).maybeSingle()
+      setReferralEnabled(appSettings?.referral_enabled || false)
       setForm({
         display_name: p.display_name || '',
         username: p.username || '',
@@ -196,7 +200,7 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {referralCode && (
+      {referralCode && referralEnabled && (
         <div className="card p-4 mb-4" style={{ border: '1px solid rgba(45,212,191,0.2)', background: 'rgba(45,212,191,0.03)' }}>
           {referralToast && <div className="toast mb-2">{referralToast}</div>}
           <div className="flex items-start justify-between gap-3 mb-2">
