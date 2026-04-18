@@ -1,1097 +1,289 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
-interface Message {
-  id: string
-  user_id: string
-  content: string
-  media_url?: string | null
-  media_type?: string | null
-  created_at: string
-  display_name?: string
-  username?: string
-  weight_unit?: string
-  start_weight?: number
-  current_weight?: number
-  is_admin?: boolean
-  is_coach?: boolean
-  quick_replies?: string[] | null
-  payload?: { photo_id?: string; category?: string } | null
-  reply_to_user_id?: string | null
-}
-
-interface ProfileModal {
-  user_id: string
-  display_name: string
-  username: string
-  start_weight: number
-  current_weight: number
-  goal_weight: number | null
-  weight_unit: string
-  follower_count: number
-}
-
-interface HeartState {
-  [photoId: string]: { count: number; hearted: boolean }
-}
-
-const COACH_IDS = new Set([
-  '00000000-0000-0000-0000-000000000001',
-  '00000000-0000-0000-0000-000000000002',
-  '00000000-0000-0000-0000-000000000003',
-  '00000000-0000-0000-0000-000000000004',
-  '00000000-0000-0000-0000-000000000005',
-])
-
-const COACH_SPECIALTIES: Record<string, string> = {
-  '00000000-0000-0000-0000-000000000001': 'Fat Loss & Steps',
-  '00000000-0000-0000-0000-000000000002': 'Strength & Lifting',
-  '00000000-0000-0000-0000-000000000003': 'Cardio & Conditioning',
-  '00000000-0000-0000-0000-000000000004': 'Nutrition & Diet',
-  '00000000-0000-0000-0000-000000000005': 'Mindset & Motivation',
-}
-
-const COACH_NAMES: Record<string, string> = {
-  '00000000-0000-0000-0000-000000000001': 'Coach Maya',
-  '00000000-0000-0000-0000-000000000002': 'Coach Dex',
-  '00000000-0000-0000-0000-000000000003': 'Coach Riley',
-  '00000000-0000-0000-0000-000000000004': 'Coach Nova',
-  '00000000-0000-0000-0000-000000000005': 'Coach Blaze',
-}
-
-const CATEGORY_COLORS: Record<string, string> = {
-  Gym: '#2dd4bf',
-  Walk: '#60a5fa',
-  Meal: '#f59e0b',
-  Other: '#a78bfa',
-}
-
-const BLOCKED_PATTERNS = [
-  /instagram|facebook|tiktok|snapchat|twitter|youtube|linkedin|pinterest|threads|reddit|whatsapp|telegram|discord|twitch/i,
-  /\big\b|\btt\b|\byt\b|\bfb\b|\bsc\b/i,
-  /https?:\/\//i,
-  /\b\w+\.(com|net|io|org|co|app|gg|tv|me|link|bio|xyz|info|us|uk|ca)\b/i,
-  /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/,
-  /(\+?\d[\d\s\-().]{7,}\d)/,
-  /dm me|message me|text me|hit me up|reach me|contact me|find me|follow me/i,
-  /venmo|cashapp|paypal|zelle|cash app/i,
-  /my program|my plan|my course|my coaching|my page|my channel/i,
+const DIET_OPTIONS = [
+  'Standard', 'Vegetarian', 'Vegan', 'Pescatarian',
+  'Keto', 'Ketovore', 'Carnivore', 'Mediterranean',
+  'Paleo', 'Intermittent Fasting', 'Gluten-Free', 'Dairy-Free', 'Other',
 ]
 
-// Safe merge — never overwrite media fields with profile cache
-function mergeProfile(msg: Message, profile: Partial<Message> | undefined): Message {
-  if (!profile) return msg
-  return { ...msg, display_name: profile.display_name ?? msg.display_name, username: profile.username ?? msg.username, weight_unit: profile.weight_unit ?? msg.weight_unit, start_weight: profile.start_weight ?? msg.start_weight, current_weight: profile.current_weight ?? msg.current_weight, is_admin: profile.is_admin ?? msg.is_admin, is_coach: profile.is_coach ?? msg.is_coach }
-}
-
-function isBlocked(text: string): boolean {
-  return BLOCKED_PATTERNS.some(p => p.test(text))
-}
-
-function formatTime(ts: string): string {
-  return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
-}
-
-function extractProofCategory(msg: Message): string | null {
-  if (msg.payload?.category) return msg.payload.category
-  if (msg.content?.startsWith('proof_category:')) return msg.content.replace('proof_category:', '').trim()
-  return null
-}
-
-function extractPhotoId(msg: Message): string | null {
-  if (msg.payload?.photo_id) return msg.payload.photo_id
-  return null
-}
-
-function useCountdown(targetIso: string | null): string {
-  const [display, setDisplay] = useState('')
-  useEffect(() => {
-    if (!targetIso) { setDisplay(''); return }
-    const iso = targetIso
-    function update() {
-      const ms = new Date(iso).getTime() - Date.now()
-      if (ms <= 0) { setDisplay(''); return }
-      const h = Math.floor(ms / 3600000)
-      const m = Math.floor((ms % 3600000) / 60000)
-      const s = Math.floor((ms % 60000) / 1000)
-      setDisplay(`${h}h ${m}m ${s}s`)
-    }
-    update()
-    const t = setInterval(update, 1000)
-    return () => clearInterval(t)
-  }, [targetIso])
-  return display
-}
-
-function MessageContent({ content, isAdmin, isMe }: { content: string; isAdmin: boolean; isMe: boolean }) {
-  if (!isAdmin || !content) return <span>{content}</span>
-  const urlRegex = /(https?:\/\/[^\s]+|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|www\.[^\s]+)/g
-  const parts = content.split(urlRegex)
-  return (
-    <>
-      {parts.map((part, i) => {
-        if (urlRegex.test(part)) {
-          urlRegex.lastIndex = 0
-          const href = part.startsWith('http') ? part : part.includes('@') ? `mailto:${part}` : `https://${part}`
-          return <a key={i} href={href} target="_blank" rel="noopener noreferrer" style={{ color: isMe ? '#0D1117' : 'var(--accent)', textDecoration: 'underline', wordBreak: 'break-all' }}>{part}</a>
-        }
-        return <span key={i}>{part}</span>
-      })}
-    </>
-  )
-}
-
-export default function ChatPage() {
-  const supabase = useMemo(() => createClient(), [])
+export default function OnboardingPage() {
+  const supabase = createClient()
   const router = useRouter()
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const proofFileInputRef = useRef<HTMLInputElement>(null)
+  const [step, setStep] = useState(1)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
-  const [messages, setMessages] = useState<Message[]>([])
-  const [input, setInput] = useState('')
-  const [sending, setSending] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [blockedNotice, setBlockedNotice] = useState(false)
-  const [isPlus, setIsPlus] = useState<boolean | null>(null)
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [userId, setUserId] = useState('')
-  const [profileCache, setProfileCache] = useState<Record<string, Partial<Message>>>({})
-  const [followedIds, setFollowedIds] = useState<Set<string>>(new Set())
-  const [profileModal, setProfileModal] = useState<ProfileModal | null>(null)
-  const [followLoading, setFollowLoading] = useState(false)
-  const [showTip, setShowTip] = useState(false)
-  const [showCoachTip, setShowCoachTip] = useState(false)
-  const [usedQuickReplies, setUsedQuickReplies] = useState<Set<string>>(() => {
-    try {
-      const stored = localStorage.getItem('nuroni-used-pills')
-      return stored ? new Set<string>(JSON.parse(stored)) : new Set<string>()
-    } catch { return new Set<string>() }
+  const [form, setForm] = useState({
+    display_name: '',
+    username: '',
+    height: '',
+    weight_unit: 'lbs',
+    distance_unit: 'miles',
+    start_weight: '',
+    goal_weight: '',
+    daily_step_goal: '8000',
+    is_public: true,
+    diet_type: '',
+    diet_custom: '',
   })
-  const [otherHint, setOtherHint] = useState<string | null>(null)
-  const [activeCoachId, setActiveCoachId] = useState<string | null>(null)
-  const [lastUserMsgAt, setLastUserMsgAt] = useState<number | null>(null)
-  const [showCoachKeepPrompt, setShowCoachKeepPrompt] = useState(false)
-  const [heartState, setHeartState] = useState<HeartState>({})
-  const [fullscreenPhoto, setFullscreenPhoto] = useState<string | null>(null)
 
-  const [canPostProof, setCanPostProof] = useState<boolean | null>(null)
-  const [nextAllowedAt, setNextAllowedAt] = useState<string | null>(null)
-  const [todayProofs, setTodayProofs] = useState<{ id: string; photo_url: string; category: string; user_id: string; display_name?: string }[]>([])
-  const [todayProofsExpanded, setTodayProofsExpanded] = useState(false)
-  const [fullscreenTodayPhoto, setFullscreenTodayPhoto] = useState<string | null>(null)
-  const [showCategoryPicker, setShowCategoryPicker] = useState(false)
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
-  const [proofToast, setProofToast] = useState('')
+  function set(k: string, v: string | boolean) {
+    setForm(f => ({ ...f, [k]: v }))
+  }
 
-  const countdown = useCountdown(canPostProof === false ? nextAllowedAt : null)
+  async function save() {
+    setSaving(true)
+    setError('')
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { router.push('/login'); return }
 
-  // Coach of the Day — rotates daily based on day of year
-  const coachOfDayId = (() => {
-    const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000)
-    const ids = [
-      '00000000-0000-0000-0000-000000000001',
-      '00000000-0000-0000-0000-000000000002',
-      '00000000-0000-0000-0000-000000000003',
-      '00000000-0000-0000-0000-000000000004',
-      '00000000-0000-0000-0000-000000000005',
-    ]
-    return ids[dayOfYear % ids.length]
-  })()
-  const coachOfDayName = COACH_NAMES[coachOfDayId] || 'Coach'
-  const coachOfDaySpecialty = COACH_SPECIALTIES[coachOfDayId] || ''
+    const username = form.username.toLowerCase().replace(/[^a-z0-9_]/g, '')
+    if (!username) { setError('Username is required'); setSaving(false); return }
 
-  const fetchProfiles = useCallback(async (userIds: string[]) => {
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('id, display_name, username, weight_unit, start_weight, is_admin, is_coach')
-      .in('id', userIds)
-
-    const { data: entries } = await supabase
-      .from('entries')
-      .select('user_id, weight, created_at')
-      .in('user_id', userIds)
-      .order('created_at', { ascending: false })
-
-    const latestWeights: Record<string, number> = {}
-    entries?.forEach(e => { if (!latestWeights[e.user_id]) latestWeights[e.user_id] = e.weight })
-
-    const result: Record<string, Partial<Message>> = {}
-    profiles?.forEach(p => {
-      result[p.id] = {
-        display_name: p.display_name,
-        username: p.username,
-        weight_unit: p.weight_unit,
-        start_weight: p.start_weight,
-        current_weight: latestWeights[p.id],
-        is_admin: p.is_admin,
-        is_coach: p.is_coach,
-      }
-    })
-    return result
-  }, [supabase])
-
-  async function loadHeartStates(msgs: Message[], currentUserId: string) {
-    const proofMsgs = msgs.filter(m => m.media_type === 'proof_photo')
-    if (proofMsgs.length === 0) return
-    const photoIds = proofMsgs.map(m => extractPhotoId(m)).filter(Boolean) as string[]
-    if (photoIds.length === 0) return
-
-    const { data: hearts } = await supabase
-      .from('proof_hearts')
-      .select('photo_id, user_id')
-      .in('photo_id', photoIds)
-
-    const counts: Record<string, number> = {}
-    const myHearts = new Set<string>()
-    hearts?.forEach(h => {
-      counts[h.photo_id] = (counts[h.photo_id] || 0) + 1
-      if (h.user_id === currentUserId) myHearts.add(h.photo_id)
+    const { error: pErr } = await supabase.from('profiles').upsert({
+      id: user.id,
+      email: user.email,
+      display_name: form.display_name || 'Friend',
+      username,
+      height: form.height ? parseFloat(form.height) : null,
+      weight_unit: form.weight_unit,
+      distance_unit: form.distance_unit,
+      start_weight: parseFloat(form.start_weight),
+      is_public: form.is_public,
+      diet_type: form.diet_type || null,
+      diet_custom: form.diet_type === 'Other' ? form.diet_custom : null,
     })
 
-    const newState: HeartState = {}
-    photoIds.forEach(id => {
-      newState[id] = { count: counts[id] || 0, hearted: myHearts.has(id) }
+    if (pErr) { setError(pErr.message); setSaving(false); return }
+
+    await supabase.from('goals').upsert({
+      user_id: user.id,
+      goal_weight: parseFloat(form.goal_weight),
+      daily_step_goal: parseInt(form.daily_step_goal),
     })
-    setHeartState(prev => ({ ...prev, ...newState }))
-  }
 
-  // ── Data loading (auth, profile, messages, proof status) ──────────────────
-  useEffect(() => {
-    async function init() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/login'); return }
-      setUserId(user.id)
-
-      const { data: profile } = await supabase
-        .from('profiles').select('is_plus, is_admin').eq('id', user.id).maybeSingle()
-
-      const userIsPlus = profile?.is_plus || false
-      setIsPlus(userIsPlus)
-      setIsAdmin(profile?.is_admin || false)
-
-      if (userIsPlus) {
-        const tipSeen = localStorage.getItem('nuroni-chat-tip')
-        if (!tipSeen) setShowTip(true)
-
-        const coachTipSeen = localStorage.getItem('nuroni-coach-tip')
-        if (!coachTipSeen) setShowCoachTip(true)
-
-        const { data: follows } = await supabase
-          .from('follows').select('following_id').eq('follower_id', user.id)
-        setFollowedIds(new Set(Array.from(follows?.map(f => f.following_id) || [])))
-      }
-
-      const { data: msgs } = await supabase
-        .from('messages').select('*').order('created_at', { ascending: false }).limit(100)
-
-      const initialMsgs = (msgs || []).reverse()
-      setMessages(initialMsgs)
-
-      if (initialMsgs.length > 0) {
-        const ids = Array.from(new Set(initialMsgs.map(m => m.user_id)))
-        fetchProfiles(ids).then(cache => {
-          setProfileCache(cache)
-          setMessages(prev => prev.map(m => mergeProfile(m, cache[m.user_id])))
-        })
-        setTimeout(() => loadHeartStates(initialMsgs, user.id), 200)
-      }
-
-      // Load today's proofs from all users
-      const todayStart = new Date()
-      todayStart.setHours(0, 0, 0, 0)
-      const { data: allTodayProofs } = await supabase
-        .from('proof_photos')
-        .select('id, photo_url, category, user_id')
-        .gte('created_at', todayStart.toISOString())
-        .order('created_at', { ascending: false })
-      if (allTodayProofs && allTodayProofs.length > 0) {
-        const profileIds = Array.from(new Set(allTodayProofs.map(p => p.user_id)))
-        const { data: proofProfiles } = await supabase.from('profiles').select('id, display_name').in('id', profileIds)
-        const nameMap: Record<string, string> = {}
-        proofProfiles?.forEach(p => { nameMap[p.id] = p.display_name })
-        setTodayProofs(allTodayProofs.map(p => ({ ...p, display_name: nameMap[p.user_id] || 'Member' })))
-      }
-
-      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-      const { data: recent } = await supabase
-        .from('proof_photos').select('id, created_at').eq('user_id', user.id)
-        .gte('created_at', twentyFourHoursAgo).limit(1)
-
-      if (recent && recent.length > 0) {
-        setCanPostProof(false)
-        const next = new Date(new Date(recent[0].created_at).getTime() + 24 * 60 * 60 * 1000)
-        setNextAllowedAt(next.toISOString())
-      } else {
-        setCanPostProof(true)
-      }
-    }
-
-    init()
-  }, [supabase, router, fetchProfiles])
-
-  // ── Realtime subscription — separate effect, runs once isPlus is confirmed ─
-  useEffect(() => {
-    if (!isPlus) return
-
-    const channelName = `fitness-chat-${Date.now()}`
-    const channel = supabase
-      .channel(channelName)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-        const newMsg = payload.new as Message
-        setMessages(prev => {
-          if (prev.find(m => m.id === newMsg.id)) return prev
-          return [...prev, newMsg]
-        })
-        setProfileCache(cache => {
-          if (cache[newMsg.user_id]) {
-            setMessages(prev => prev.map(m => m.id === newMsg.id ? mergeProfile(m, cache[newMsg.user_id]) : m))
-            return cache
-          }
-          fetchProfiles([newMsg.user_id]).then(newCache => {
-            const merged = { ...cache, ...newCache }
-            setProfileCache(merged)
-            setMessages(prev => prev.map(m => m.id === newMsg.id ? mergeProfile(m, merged[m.user_id]) : m))
-          })
-          return cache
-        })
-        if (newMsg.media_type === 'proof_photo') {
-          const pid = extractPhotoId(newMsg)
-          if (pid) setHeartState(prev => ({ ...prev, [pid]: { count: 0, hearted: false } }))
-          // Add to today's proofs strip
-          const cat = newMsg.payload?.category || (newMsg.content?.startsWith('proof_category:') ? newMsg.content.replace('proof_category:', '').trim() : 'Other')
-          setTodayProofs(prev => {
-            if (prev.find(p => p.id === pid)) return prev
-            return [{ id: pid || newMsg.id, photo_url: newMsg.media_url || '', category: cat, user_id: newMsg.user_id }, ...prev]
-          })
-        }
-        // Set active coach when a coach replies — checked against userId via state setter
-        if (COACH_IDS.has(newMsg.user_id) && newMsg.reply_to_user_id) {
-          setUserId(currentId => {
-            if (newMsg.reply_to_user_id === currentId) {
-              setActiveCoachId(newMsg.user_id)
-              setLastUserMsgAt(Date.now())
-              setShowCoachKeepPrompt(false)
-            }
-            return currentId
-          })
-        }
-      })
-      .subscribe()
-
-    return () => { channel.unsubscribe() }
-  }, [isPlus, supabase, fetchProfiles])
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length])
-
-  useEffect(() => {
-    if (showTip) { const t = setTimeout(dismissTip, 6000); return () => clearTimeout(t) }
-  }, [showTip])
-
-  useEffect(() => {
-    if (proofToast) { const t = setTimeout(() => setProofToast(''), 3000); return () => clearTimeout(t) }
-  }, [proofToast])
-
-  useEffect(() => {
-    try { localStorage.setItem('nuroni-used-pills', JSON.stringify(Array.from(usedQuickReplies))) } catch {}
-  }, [usedQuickReplies])
-
-  // 3-minute inactivity timer — show "Still chatting?" prompt
-  useEffect(() => {
-    if (!activeCoachId || !lastUserMsgAt) return
-    const THREE_MIN = 3 * 60 * 1000
-    const interval = setInterval(() => {
-      const elapsed = Date.now() - lastUserMsgAt
-      if (elapsed >= THREE_MIN && !showCoachKeepPrompt) {
-        setShowCoachKeepPrompt(true)
-      }
-    }, 10000) // check every 10 seconds
-    return () => clearInterval(interval)
-  }, [activeCoachId, lastUserMsgAt, showCoachKeepPrompt])
-
-  // Auto-clear after 3 more minutes of no response to prompt
-  useEffect(() => {
-    if (!showCoachKeepPrompt) return
-    const t = setTimeout(() => {
-      setActiveCoachId(null)
-      setShowCoachKeepPrompt(false)
-      setLastUserMsgAt(null)
-    }, 3 * 60 * 1000)
-    return () => clearTimeout(t)
-  }, [showCoachKeepPrompt])
-
-  function buildContext(currentMessages: Message[]): { role: string; content: string; coach_id?: string; had_quick_replies?: boolean }[] {
-    return currentMessages.slice(-6).filter(m => m.content && !m.content.startsWith('proof_category:')).map(m => ({
-      role: COACH_IDS.has(m.user_id) ? 'assistant' : 'user',
-      content: m.content,
-      coach_id: COACH_IDS.has(m.user_id) ? m.user_id : undefined,
-      had_quick_replies: !!(m.quick_replies && m.quick_replies.length > 0),
-    }))
-  }
-
-  async function openProfile(msg: Message) {
-    if (!msg.username || msg.is_coach || COACH_IDS.has(msg.user_id)) return
-    const { data: goal } = await supabase.from('goals').select('goal_weight').eq('user_id', msg.user_id).maybeSingle()
-    const { count } = await supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', msg.user_id)
-    setProfileModal({
-      user_id: msg.user_id,
-      display_name: msg.display_name || msg.username || 'Member',
-      username: msg.username,
-      start_weight: msg.start_weight || 0,
-      current_weight: msg.current_weight || msg.start_weight || 0,
-      goal_weight: goal?.goal_weight || null,
-      weight_unit: msg.weight_unit || 'lbs',
-      follower_count: count || 0,
+    // Insert a personal welcome message from Coach Maya
+    const coachMayaId = '00000000-0000-0000-0000-000000000001'
+    const name = form.display_name || 'there'
+    await supabase.from('messages').insert({
+      user_id: coachMayaId,
+      content: `Hey ${name}! I'm Coach Maya. I'm here to help you with your fat loss and step goals. Type @coach any time you have a question, or just start chatting — I've got you. Welcome to Nuroni! 💪`,
+      media_url: null,
+      media_type: null,
+      quick_replies: ['What should I focus on first?', 'How many steps should I walk?', 'Tell me more about this app'],
+      reply_to_user_id: user.id,
     })
+
+    router.push('/progress')
   }
 
-  async function toggleFollow(targetId: string) {
-    if (!userId || userId === targetId) return
-    setFollowLoading(true)
-    if (followedIds.has(targetId)) {
-      await supabase.from('follows').delete().eq('follower_id', userId).eq('following_id', targetId)
-      setFollowedIds(prev => { const s = new Set(prev); s.delete(targetId); return s })
-      if (profileModal) setProfileModal({ ...profileModal, follower_count: Math.max(0, profileModal.follower_count - 1) })
-    } else {
-      await supabase.from('follows').insert({ follower_id: userId, following_id: targetId })
-      setFollowedIds(prev => new Set(Array.from(prev).concat(targetId)))
-      if (profileModal) setProfileModal({ ...profileModal, follower_count: profileModal.follower_count + 1 })
-    }
-    setFollowLoading(false)
-  }
-
-  function dismissTip() { setShowTip(false); localStorage.setItem('nuroni-chat-tip', '1') }
-  function dismissCoachTip() { setShowCoachTip(false); localStorage.setItem('nuroni-coach-tip', '1') }
-
-  async function toggleHeart(photoId: string) {
-    if (!userId) return
-    const current = heartState[photoId] || { count: 0, hearted: false }
-    if (current.hearted) {
-      setHeartState(prev => ({ ...prev, [photoId]: { count: Math.max(0, prev[photoId]?.count - 1), hearted: false } }))
-      await supabase.from('proof_hearts').delete().eq('photo_id', photoId).eq('user_id', userId)
-    } else {
-      setHeartState(prev => ({ ...prev, [photoId]: { count: (prev[photoId]?.count || 0) + 1, hearted: true } }))
-      await supabase.from('proof_hearts').insert({ photo_id: photoId, user_id: userId })
-    }
-  }
-
-  async function sendMessage(text?: string, mediaUrl?: string, mediaType?: string, fromPill?: boolean) {
-    const content = (text || input).trim()
-    if (!content && !mediaUrl) return
-    if (sending) return
-
-    const atMentionBlocked = !isAdmin && /(?<!^)@(?!coach\b)/i.test(content)
-    if (!isAdmin && content && (isBlocked(content) || atMentionBlocked)) {
-      setBlockedNotice(true)
-      setTimeout(() => setBlockedNotice(false), 3000)
-      return
-    }
-
-    const tempId = `temp-${Date.now()}`
-    const optimistic: Message = { id: tempId, user_id: userId, content, media_url: mediaUrl || null, media_type: mediaType || null, created_at: new Date().toISOString(), ...profileCache[userId] }
-    setMessages(prev => [...prev, optimistic])
-    if (!text) setInput('')
-    setOtherHint(null)
-    setLastUserMsgAt(Date.now())
-    setShowCoachKeepPrompt(false)
-    inputRef.current?.focus()
-
-    setSending(true)
-    const { data, error } = await supabase.from('messages').insert({ user_id: userId, content, media_url: mediaUrl || null, media_type: mediaType || null }).select().maybeSingle()
-    setSending(false)
-
-    if (error) {
-      setMessages(prev => prev.filter(m => m.id !== tempId))
-      if (!text && !mediaUrl) setInput(content)
-    } else if (data) {
-      setMessages(prev => prev.map(m => m.id === tempId ? mergeProfile(data, profileCache[userId]) : m))
-      const isAtCoach = content.toLowerCase().startsWith('@coach')
-      const shouldFireCoach = isAtCoach || fromPill || !!activeCoachId
-      if (content && shouldFireCoach) {
-        const context = buildContext(messages)
-        fetch('/api/coach', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content, user_id: userId, context, from_pill: fromPill || false, active_coach_id: activeCoachId }),
-        }).catch(() => {})
-      }
-    }
-  }
-
-  async function handleQuickReply(msgId: string, reply: string) {
-    setUsedQuickReplies(prev => new Set(Array.from(prev).concat(msgId)))
-    await sendMessage(reply, undefined, undefined, true)
-  }
-
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    if (file.size > 10 * 1024 * 1024) { alert('Max 10MB'); return }
-    setUploading(true)
-    const formData = new FormData()
-    formData.append('file', file)
-    const res = await fetch('/api/chat/upload', { method: 'POST', body: formData })
-    const data = await res.json()
-    setUploading(false)
-    if (data.url) {
-      const tempId = `temp-${Date.now()}`
-      const optimistic: Message = { id: tempId, user_id: userId, content: '', media_url: data.url, media_type: data.mediaType, created_at: new Date().toISOString(), ...profileCache[userId] }
-      setMessages(prev => [...prev, optimistic])
-      const { data: msgData, error } = await supabase.from('messages').insert({ user_id: userId, content: '', media_url: data.url, media_type: data.mediaType }).select().maybeSingle()
-      if (!error && msgData) setMessages(prev => prev.map(m => m.id === tempId ? mergeProfile(msgData, profileCache[userId]) : m))
-    }
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
-  function handleProofButtonClick() {
-    if (!canPostProof) {
-      if (countdown) setProofToast(`Next Proof available in ${countdown}`)
-      else setProofToast('Already posted your Proof of the Day!')
-      return
-    }
-    setShowCategoryPicker(true)
-  }
-
-  function handleCategorySelect(cat: string) {
-    setSelectedCategory(cat)
-    setShowCategoryPicker(false)
-    setTimeout(() => proofFileInputRef.current?.click(), 100)
-  }
-
-  async function handleProofFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file || !selectedCategory) return
-    if (file.size > 10 * 1024 * 1024) { setProofToast('Max 10MB'); return }
-
-    setUploading(true)
-    const formData = new FormData()
-    formData.append('file', file)
-    formData.append('category', selectedCategory)
-
-    const res = await fetch('/api/proof/upload', { method: 'POST', body: formData })
-    const data = await res.json()
-    setUploading(false)
-
-    if (data.error === 'already_posted_today') {
-      setCanPostProof(false)
-      if (data.next_allowed_at) setNextAllowedAt(data.next_allowed_at)
-      setProofToast('Already posted your Proof of the Day!')
-    } else if (data.success) {
-      setCanPostProof(false)
-      setNextAllowedAt(new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString())
-      setProofToast('Proof posted!')
-    } else {
-      setProofToast('Upload failed. Try again.')
-    }
-
-    setSelectedCategory(null)
-    if (proofFileInputRef.current) proofFileInputRef.current.value = ''
-  }
-
-  // Non-Plus users see the chat behind an overlay — handled inline below
-
-  if (isPlus === null) return (
-    <div className="flex items-center justify-center min-h-screen">
-      <div className="w-6 h-6 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
-    </div>
-  )
+  const unit = form.weight_unit
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 max-w-lg mx-auto w-full overflow-x-hidden" style={{ position: 'relative' }}>
-
-      {/* Paywall overlay for non-Plus users */}
-      {isPlus === false && (
-        <div
-          className="absolute inset-0 z-50 flex items-center justify-center p-6"
-          style={{
-            backdropFilter: 'blur(6px)',
-            WebkitBackdropFilter: 'blur(6px)',
-            background: 'rgba(13,17,23,0.75)',
-          }}
-        >
-          <div
-            className="card p-6 w-full max-w-sm text-center animate-fade-in"
-            style={{ border: '1.5px solid var(--accent)', background: 'var(--bg-card)' }}
-          >
-            <div className="text-3xl mb-3">💬</div>
-            <h2 className="text-base font-bold mb-2" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-              Join the conversation
-            </h2>
-            <p className="text-xs mb-1" style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-              Real people. Real journeys. 5 AI coaches who know you by name.
-            </p>
-            <p className="text-xs mb-5" style={{ color: 'var(--text-muted)' }}>
-              All of this — plus your journal, leaderboard, and proof photos — included in your trial.
-            </p>
-            <button
-              onClick={() => router.push('/plus')}
-              className="btn-primary w-full mb-3"
-            >
-              Start 7-day free trial →
-            </button>
-            <button
-              onClick={() => router.push('/progress')}
-              className="btn-secondary w-full text-sm"
-            >
-              Back to progress
-            </button>
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 overflow-x-hidden" style={{ background: 'var(--bg)' }}>
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-6">
+          <img src="/logo.png" alt="Nuroni" style={{ height: '40px', width: 'auto', display: 'block', margin: '0 auto 1rem' }} />
+          <div className="flex items-center justify-center gap-2 mb-2">
+            {[1, 2, 3, 4, 5].map(i => (
+              <div key={i} className="h-1.5 rounded-full transition-all" style={{ width: step === i ? '24px' : '8px', background: step >= i ? 'var(--accent)' : 'var(--border)' }} />
+            ))}
           </div>
-        </div>
-      )}
-      <div className="flex-shrink-0 px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
-        <div>
-          <h1 className="text-base font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Fitness Chat</h1>
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Plus+ members · fitness topics only</p>
-        </div>
-        <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: 'var(--accent)', color: '#0D1117' }}>Live</span>
-      </div>
-
-      {showTip && (
-        <div className="mx-4 mt-2 px-4 py-3 rounded-xl flex items-center justify-between gap-3 animate-fade-in" style={{ background: 'var(--accent-subtle)', border: '1px solid rgba(45,212,191,0.3)' }}>
-          <p className="text-xs" style={{ color: 'var(--accent-text)', lineHeight: 1.5 }}>Tap any name to check their stats and follow their journey.</p>
-          <button onClick={dismissTip} style={{ color: 'var(--accent-text)', flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer' }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-      )}
-
-      {!showTip && showCoachTip && (
-        <div className="mx-4 mt-2 px-4 py-3 rounded-xl flex items-center justify-between gap-3 animate-fade-in" style={{ background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.25)' }}>
-          <p className="text-xs" style={{ color: '#a78bfa', lineHeight: 1.5 }}>
-            Type <strong>@coach</strong> before your message to get a reply from one of our AI fitness coaches.
-          </p>
-          <button onClick={dismissCoachTip} style={{ color: '#a78bfa', flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer' }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-      )}
-
-      {/* Coach of the Day */}
-      <div className="mx-4 mt-2 px-3 py-2.5 rounded-xl flex items-center justify-between gap-3" style={{ background: 'rgba(167,139,250,0.06)', border: '1px solid rgba(167,139,250,0.15)' }}>
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm">⭐</span>
-          <p className="text-xs" style={{ color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-            <span style={{ color: '#a78bfa', fontWeight: 600 }}>Coach of the day: {coachOfDayName}</span>
-            <span style={{ color: 'var(--text-muted)' }}> · {coachOfDaySpecialty}</span>
-          </p>
-        </div>
-        <button
-          onClick={() => {
-            setActiveCoachId(coachOfDayId)
-            setLastUserMsgAt(Date.now())
-            setShowCoachKeepPrompt(false)
-            setOtherHint(`Chatting with ${coachOfDayName}...`)
-            setTimeout(() => inputRef.current?.focus(), 50)
-          }}
-          className="text-xs px-2.5 py-1 rounded-lg font-semibold flex-shrink-0"
-          style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.3)', cursor: 'pointer' }}
-        >
-          Ask
-        </button>
-      </div>
-
-      {/* Today's Proofs strip — always visible */}
-      <div className="mt-2">
-          <button
-            onClick={() => setTodayProofsExpanded(v => !v)}
-            className="w-full mx-0 px-4 py-2 flex items-center justify-between"
-            style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-          >
-            <p className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-              📸 Today's Proof
-              {todayProofs.length > 0 && (
-                <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
-                  {todayProofs.length}
-                </span>
-              )}
-            </p>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', transform: todayProofsExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </button>
-          {todayProofsExpanded && (
-            <div className="px-4 pb-2 animate-fade-in">
-              {todayProofs.length === 0 ? (
-                <div className="flex items-center gap-2 py-2">
-                  <span className="text-lg">📷</span>
-                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    No proofs posted yet today — be the first!
-                    {' '}<span style={{ color: 'var(--accent)' }}>Tap the camera icon below to post yours.</span>
-                  </p>
-                </div>
-              ) : (
-                <div className="flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-                  {todayProofs.map(proof => (
-                    <div
-                      key={proof.id}
-                      className="flex-shrink-0 cursor-pointer"
-                      style={{ width: 72, position: 'relative' }}
-                      onClick={() => setFullscreenTodayPhoto(proof.photo_url)}
-                    >
-                      <div style={{ width: 72, height: 72, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)' }}>
-                        <img src={proof.photo_url} alt={proof.category} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      </div>
-                      <div style={{ position: 'absolute', bottom: 4, left: 4 }}>
-                        <span style={{ fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 3, background: `${CATEGORY_COLORS[proof.category] || '#888'}cc`, color: '#fff' }}>
-                          {proof.category}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Step {step} of 5</p>
         </div>
 
-      {/* Fullscreen today proof */}
-      {fullscreenTodayPhoto && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.92)' }} onClick={() => setFullscreenTodayPhoto(null)}>
-          <button onClick={() => setFullscreenTodayPhoto(null)} style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'white' }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-          <img src={fullscreenTodayPhoto} alt="Proof" style={{ maxWidth: '95vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 12 }} onClick={e => e.stopPropagation()} />
-        </div>
-      )}
+        <div className="card p-6 animate-fade-in">
 
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-        {messages.length === 0 && (
-          <div className="text-center py-12">
-            <div className="text-3xl mb-3">👋</div>
-            <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>Be the first to say something!</p>
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Ask about workouts, meal plans, progress — anything fitness.</p>
-          </div>
-        )}
-
-        {messages.map((msg, i) => {
-          const isMe = msg.user_id === userId
-          const isCoach = msg.is_coach || COACH_IDS.has(msg.user_id)
-          const isFollowed = followedIds.has(msg.user_id)
-          const showName = !isMe && (i === 0 || messages[i - 1].user_id !== msg.user_id)
-          const lostSoFar = msg.start_weight && msg.current_weight ? parseFloat((msg.start_weight - msg.current_weight).toFixed(1)) : null
-          const specialty = isCoach ? COACH_SPECIALTIES[msg.user_id] : null
-          const hasQuickReplies = isCoach && msg.quick_replies && msg.quick_replies.length > 0 && !usedQuickReplies.has(msg.id)
-          // Only suppress pills if a later coach message is directed at the same user (not a reply to someone else)
-          const isLastCoachMsg = hasQuickReplies && !messages.slice(i + 1).some(m =>
-            COACH_IDS.has(m.user_id) && (!m.reply_to_user_id || m.reply_to_user_id === userId)
-          )
-          // Pills only active for the user the coach was replying to
-          const pillsAreForMe = !msg.reply_to_user_id || msg.reply_to_user_id === userId
-          // Broadcast = coach message with no reply_to_user_id and no quick_replies — show reply button
-          const isBroadcast = isCoach && !msg.reply_to_user_id && !msg.quick_replies && !!msg.content
-          const isLastBroadcast = isBroadcast && !messages.slice(i + 1).some(m => COACH_IDS.has(m.user_id) && !m.reply_to_user_id && !m.quick_replies)
-          const isProofPhoto = msg.media_type === 'proof_photo'
-          const photoId = extractPhotoId(msg)
-          const category = extractProofCategory(msg)
-          const hearts = photoId ? (heartState[photoId] || { count: 0, hearted: false }) : null
-
-          return (
-            <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-              {showName && (
-                <button
-                  className="flex items-center gap-1.5 mb-1 ml-1 flex-wrap"
-                  onClick={() => openProfile(msg)}
-                  style={{ background: 'none', border: 'none', cursor: isCoach ? 'default' : 'pointer', padding: 0 }}
-                >
-                  <span className="text-xs font-semibold" style={{ color: isCoach ? '#a78bfa' : isFollowed ? 'var(--accent)' : 'var(--text-primary)' }}>
-                    {msg.display_name || msg.username || 'Member'}
-                  </span>
-                  {isCoach && (
-                    <span className="text-xs px-1.5 py-0.5 rounded-full font-bold" style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa', fontSize: '9px', border: '1px solid rgba(167,139,250,0.3)' }}>AI COACH</span>
-                  )}
-                  {isCoach && specialty && (
-                    <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(167,139,250,0.08)', color: 'rgba(167,139,250,0.7)', fontSize: '9px', border: '1px solid rgba(167,139,250,0.15)' }}>{specialty}</span>
-                  )}
-                  {!isCoach && isFollowed && <span className="ml-1">⭐</span>}
-                  {!isCoach && msg.is_admin && (
-                    <span className="ml-1 text-xs px-1 rounded" style={{ background: 'var(--accent)', color: '#0D1117', fontSize: '9px' }}>ADMIN</span>
-                  )}
-                  {!isCoach && lostSoFar !== null && lostSoFar > 0 && (
-                    <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>-{lostSoFar} {msg.weight_unit || 'lbs'}</span>
-                  )}
-                </button>
-              )}
-
-              {isProofPhoto && msg.media_url && (
-                <div style={{ maxWidth: '90%', width: '100%' }}>
-                  {category && (
-                    <div className="mb-1.5 ml-0.5">
-                      <span className="text-xs px-2.5 py-1 rounded-full font-semibold" style={{ background: `${CATEGORY_COLORS[category] || '#888'}22`, color: CATEGORY_COLORS[category] || 'var(--accent)', border: `1px solid ${CATEGORY_COLORS[category] || '#888'}55` }}>
-                        {category}
-                      </span>
-                    </div>
-                  )}
-                  <div className="rounded-2xl overflow-hidden cursor-pointer" style={{ border: '1px solid var(--border)' }} onClick={() => setFullscreenPhoto(msg.media_url!)}>
-                    <img src={msg.media_url} alt={`Proof - ${category || ''}`} style={{ width: '100%', maxHeight: 320, objectFit: 'cover', display: 'block' }} />
-                  </div>
-                  {photoId && hearts && (
-                    <div className="flex items-center gap-2 mt-1.5 ml-1">
-                      <button onClick={() => toggleHeart(photoId)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill={hearts.hearted ? '#f43f5e' : 'none'} stroke={hearts.hearted ? '#f43f5e' : 'var(--text-muted)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-                        </svg>
-                        <span className="text-xs font-medium" style={{ color: hearts.hearted ? '#f43f5e' : 'var(--text-muted)' }}>{hearts.count > 0 ? hearts.count : ''}</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {!isProofPhoto && msg.media_url && (
-                <div className="max-w-[80%] mb-1">
-                  <img src={msg.media_url} alt="shared media" style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: 12, display: 'block' }} />
-                </div>
-              )}
-
-              {msg.content && !msg.content.startsWith('proof_category:') && (
-                <div className="max-w-[80%] px-3 py-2 rounded-2xl text-sm" style={{
-                  background: isMe ? 'var(--accent)' : isCoach ? 'rgba(167,139,250,0.08)' : isFollowed ? 'rgba(45,212,191,0.08)' : 'var(--bg-card)',
-                  color: isMe ? '#0D1117' : 'var(--text-primary)',
-                  border: isMe ? 'none' : isCoach ? '1px solid rgba(167,139,250,0.25)' : isFollowed ? '1px solid rgba(45,212,191,0.3)' : '1px solid var(--border)',
-                  borderBottomRightRadius: isMe ? 4 : undefined,
-                  borderBottomLeftRadius: !isMe ? 4 : undefined,
-                  opacity: msg.id.startsWith('temp-') ? 0.7 : 1,
-                  transition: 'opacity 0.2s',
-                  wordBreak: 'break-word',
-                }}>
-                  <MessageContent content={msg.content} isAdmin={!!(msg.is_admin || isMe)} isMe={isMe} />
-                </div>
-              )}
-
-              {isLastCoachMsg && (
-                <div className="flex flex-wrap gap-1.5 mt-2 max-w-[85%]">
-                  {msg.quick_replies!.map((reply, ri) => (
-                    <button
-                      key={ri}
-                      onClick={() => pillsAreForMe ? handleQuickReply(msg.id, reply) : undefined}
-                      disabled={sending || !pillsAreForMe}
-                      className="text-xs px-3 py-1.5 rounded-full font-medium transition-all"
-                      style={{
-                        background: pillsAreForMe ? 'rgba(167,139,250,0.1)' : 'var(--bg-input)',
-                        color: pillsAreForMe ? '#a78bfa' : 'var(--text-muted)',
-                        border: pillsAreForMe ? '1px solid rgba(167,139,250,0.35)' : '1px solid var(--border)',
-                        cursor: pillsAreForMe ? 'pointer' : 'default',
-                        opacity: pillsAreForMe ? 1 : 0.4,
-                      }}
-                    >
-                      {reply}
-                    </button>
-                  ))}
-                  {pillsAreForMe && (
-                    <button
-                      onClick={() => {
-                        setUsedQuickReplies(prev => new Set(Array.from(prev).concat(msg.id)))
-                        const coachName = msg.display_name || 'the coach'
-                        setOtherHint(`Type your answer to ${coachName}...`)
-                        setTimeout(() => inputRef.current?.focus(), 50)
-                      }}
-                      className="text-xs px-3 py-1.5 rounded-full font-medium transition-all"
-                      style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border)', cursor: 'pointer' }}
-                    >
-                      Other...
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Reply button for broadcast coach messages */}
-              {isLastBroadcast && activeCoachId !== msg.user_id && (
-                <button
-                  onClick={() => {
-                    setActiveCoachId(msg.user_id)
-                    setLastUserMsgAt(Date.now())
-                    setShowCoachKeepPrompt(false)
-                    const coachName = COACH_NAMES[msg.user_id] || 'the coach'
-                    setOtherHint(`Replying to ${coachName}...`)
-                    setTimeout(() => inputRef.current?.focus(), 50)
-                  }}
-                  className="mt-1.5 text-xs px-3 py-1.5 rounded-full font-medium transition-all"
-                  style={{
-                    background: 'rgba(167,139,250,0.08)',
-                    color: '#a78bfa',
-                    border: '1px solid rgba(167,139,250,0.2)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Reply to {COACH_NAMES[msg.user_id] || 'Coach'}
-                </button>
-              )}
-
-              <span className="text-xs mt-0.5 mx-1" style={{ color: 'var(--text-muted)' }}>{formatTime(msg.created_at)}</span>
-            </div>
-          )
-        })}
-        <div ref={bottomRef} />
-      </div>
-
-      {profileModal && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={() => setProfileModal(null)}>
-          <div className="card w-full max-w-sm p-5 animate-fade-in" onClick={e => e.stopPropagation()}>
-            <div className="flex items-start justify-between mb-4">
+          {/* Step 1 — Profile */}
+          {step === 1 && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                Let's set up your profile
+              </h2>
               <div>
-                <h3 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{profileModal.display_name}</h3>
-                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>@{profileModal.username} · {profileModal.follower_count} follower{profileModal.follower_count !== 1 ? 's' : ''}</p>
+                <label className="label">Display name</label>
+                <input className="input-base" placeholder="What should we call you?" value={form.display_name} onChange={e => set('display_name', e.target.value)} />
               </div>
-              <button onClick={() => toggleFollow(profileModal.user_id)} disabled={followLoading || profileModal.user_id === userId} className={followedIds.has(profileModal.user_id) ? 'btn-secondary py-2 px-3 text-sm gap-1.5' : 'btn-primary py-2 px-3 text-sm gap-1.5'}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill={followedIds.has(profileModal.user_id) ? 'var(--accent)' : 'currentColor'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-                </svg>
-                {followedIds.has(profileModal.user_id) ? 'Following' : 'Follow'}
-              </button>
-            </div>
-            <div className="grid grid-cols-3 gap-2 mb-4">
-              <div className="stat-card text-center p-3"><div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{profileModal.current_weight}</div><div className="stat-label">{profileModal.weight_unit} now</div></div>
-              <div className="stat-card text-center p-3"><div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--success)' }}>{profileModal.start_weight - profileModal.current_weight > 0 ? `-${parseFloat((profileModal.start_weight - profileModal.current_weight).toFixed(1))}` : '0'}</div><div className="stat-label">lost</div></div>
-              <div className="stat-card text-center p-3"><div className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{profileModal.goal_weight || '-'}</div><div className="stat-label">goal</div></div>
-            </div>
-            <a href={`/u/${profileModal.username}`} target="_blank" rel="noopener noreferrer" className="btn-secondary w-full text-sm" style={{ display: 'flex', textDecoration: 'none' }}>View full profile</a>
-          </div>
-        </div>
-      )}
-
-      {showCategoryPicker && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }} onClick={() => setShowCategoryPicker(false)}>
-          <div className="card w-full max-w-sm p-5 animate-fade-in" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-bold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Proof of the Day</h3>
-            <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>What are you posting proof of?</p>
-            <div className="grid grid-cols-2 gap-2">
-              {['Gym', 'Walk', 'Meal', 'Other'].map(cat => (
-                <button key={cat} onClick={() => handleCategorySelect(cat)} className="py-3 px-4 rounded-xl font-semibold text-sm transition-all" style={{ background: `${CATEGORY_COLORS[cat]}15`, color: CATEGORY_COLORS[cat], border: `1.5px solid ${CATEGORY_COLORS[cat]}40`, cursor: 'pointer' }}>
-                  {cat === 'Gym' ? '🏋️ Gym' : cat === 'Walk' ? '🚶 Walk' : cat === 'Meal' ? '🥗 Meal' : '📸 Other'}
+              <div>
+                <label className="label">Username</label>
+                <input className="input-base" placeholder="yourname (no spaces)" value={form.username} onChange={e => set('username', e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} />
+              </div>
+              <div>
+                <label className="label">Units</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Weight</label>
+                    <div className="flex gap-2">
+                      {['lbs', 'kg'].map(u => (
+                        <button key={u} onClick={() => set('weight_unit', u)} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${form.weight_unit === u ? 'btn-primary' : 'btn-secondary'}`}>{u}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Distance</label>
+                    <div className="flex gap-2">
+                      {['miles', 'km'].map(u => (
+                        <button key={u} onClick={() => set('distance_unit', u)} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${form.distance_unit === u ? 'btn-primary' : 'btn-secondary'}`}>{u}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <button onClick={() => set('is_public', !form.is_public)} className="flex-shrink-0">
+                  <div className={`w-10 h-6 rounded-full transition-colors relative ${form.is_public ? '' : ''}`} style={{ background: form.is_public ? 'var(--accent)' : 'var(--border)' }}>
+                    <div className="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform" style={{ left: form.is_public ? '20px' : '4px' }} />
+                  </div>
                 </button>
-              ))}
+                <div>
+                  <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Public profile</p>
+                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Let others find and follow your journey</p>
+                </div>
+              </div>
+              <button className="btn-primary w-full" onClick={() => { if (!form.username) { setError('Username required'); return } setError(''); setStep(2) }} disabled={!form.display_name}>Next →</button>
+              {error && <p className="text-xs text-center" style={{ color: 'var(--danger)' }}>{error}</p>}
             </div>
-          </div>
-        </div>
-      )}
-
-      {fullscreenPhoto && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.92)' }} onClick={() => setFullscreenPhoto(null)}>
-          <button onClick={() => setFullscreenPhoto(null)} style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'white' }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-          <img src={fullscreenPhoto} alt="Proof" style={{ maxWidth: '95vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 12 }} onClick={e => e.stopPropagation()} />
-        </div>
-      )}
-
-      {blockedNotice && (
-        <div className="mx-4 mb-2 px-3 py-2 rounded-xl text-xs text-center" style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--danger)' }}>
-          Keep it in-app — links, socials, and contact info are not allowed here.
-        </div>
-      )}
-
-      {proofToast && (
-        <div className="mx-4 mb-2 px-3 py-2 rounded-xl text-xs text-center" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
-          {proofToast}
-        </div>
-      )}
-
-      {uploading && (
-        <div className="mx-4 mb-2 px-3 py-2 rounded-xl text-xs text-center" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
-          Uploading...
-        </div>
-      )}
-
-      {canPostProof === false && countdown && (
-        <div className="mx-4 mb-1 px-3 py-2 rounded-xl text-xs text-center" style={{ background: 'rgba(45,212,191,0.06)', color: 'var(--text-muted)', border: '1px solid rgba(45,212,191,0.15)' }}>
-          Next Proof of the Day in <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{countdown}</span>
-        </div>
-      )}
-
-      {/* Still chatting with coach? prompt */}
-      {showCoachKeepPrompt && activeCoachId && (
-        <div className="mx-4 mb-1 px-3 py-2 rounded-xl flex items-center justify-between gap-3 animate-fade-in" style={{ background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.25)' }}>
-          <p className="text-xs" style={{ color: '#a78bfa' }}>
-            Still chatting with {COACH_NAMES[activeCoachId] || 'your coach'}?
-          </p>
-          <div className="flex gap-2 flex-shrink-0">
-            <button
-              onClick={() => {
-                setShowCoachKeepPrompt(false)
-                setLastUserMsgAt(Date.now())
-              }}
-              className="text-xs px-2.5 py-1 rounded-lg font-semibold"
-              style={{ background: 'rgba(167,139,250,0.2)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.35)', cursor: 'pointer' }}
-            >
-              Yes
-            </button>
-            <button
-              onClick={() => {
-                setActiveCoachId(null)
-                setShowCoachKeepPrompt(false)
-                setLastUserMsgAt(null)
-              }}
-              className="text-xs px-2.5 py-1 rounded-lg font-semibold"
-              style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border)', cursor: 'pointer' }}
-            >
-              No
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div className="flex-shrink-0 px-4 pb-4 pt-2 border-t" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
-        {otherHint && (
-          <div className="mb-2 px-3 py-1.5 rounded-xl text-xs text-center animate-fade-in" style={{ background: 'rgba(167,139,250,0.08)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)' }}>
-            {otherHint}
-          </div>
-        )}
-        <div className="flex items-center gap-2">
-          {isAdmin && (
-            <>
-              <input ref={fileInputRef} type="file" accept="image/*,.gif" className="hidden" onChange={handleFileUpload} />
-              <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="flex-shrink-0 p-2.5 rounded-xl" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)' }}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
-                </svg>
-              </button>
-            </>
           )}
-          {(
-            <>
-              <input ref={proofFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleProofFileSelect} />
-              <button
-                onClick={handleProofButtonClick}
-                disabled={uploading}
-                className="flex-shrink-0 p-2.5 rounded-xl"
-                title={canPostProof ? 'Post Proof of the Day' : 'Already posted today'}
-                style={{
-                  background: 'var(--bg-input)',
-                  color: canPostProof ? 'var(--accent)' : 'var(--text-muted)',
-                  opacity: canPostProof === null ? 0.5 : 1,
-                  transition: 'color 0.2s, opacity 0.2s',
-                  border: canPostProof ? '1px solid rgba(45,212,191,0.3)' : '1px solid transparent',
-                }}
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-                  <circle cx="12" cy="13" r="4"/>
-                </svg>
-              </button>
-            </>
+
+          {/* Step 2 — Weight & Goals */}
+          {step === 2 && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                Your weight journey
+              </h2>
+              <div>
+                <label className="label">Current weight ({unit})</label>
+                <input className="input-base" type="number" step="0.1" placeholder="0.0" value={form.start_weight} onChange={e => set('start_weight', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Goal weight ({unit})</label>
+                <input className="input-base" type="number" step="0.1" placeholder="0.0" value={form.goal_weight} onChange={e => set('goal_weight', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Daily step goal</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {['5000', '8000', '10000', '12000', '15000', '20000'].map(s => (
+                    <button key={s} onClick={() => set('daily_step_goal', s)} className={`py-2 rounded-lg text-sm font-medium ${form.daily_step_goal === s ? 'btn-primary' : 'btn-secondary'}`}>
+                      {parseInt(s).toLocaleString()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button className="btn-secondary flex-1" onClick={() => setStep(1)}>← Back</button>
+                <button className="btn-primary flex-1" onClick={() => { if (!form.start_weight || !form.goal_weight) { setError('Enter both weights'); return } setError(''); setStep(3) }}>Next →</button>
+              </div>
+              {error && <p className="text-xs text-center" style={{ color: 'var(--danger)' }}>{error}</p>}
+            </div>
           )}
-          <input
-            ref={inputRef}
-            className="input-base flex-1"
-            placeholder={isAdmin ? 'Send anything...' : 'Chat or type @coach to ask a coach...'}
-            value={input}
-            onChange={e => { setInput(e.target.value); if (otherHint) setOtherHint(null) }}
-            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-            maxLength={isAdmin ? 2000 : 500}
-          />
-          <button onClick={() => sendMessage()} disabled={sending || !input.trim()} className="btn-primary py-3 px-4 flex-shrink-0" style={{ borderRadius: 10 }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-            </svg>
-          </button>
+
+          {/* Step 3 — Diet type */}
+          {step === 3 && (
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-lg font-bold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                  How do you eat?
+                </h2>
+                <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Optional — helps coaches understand your approach.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {DIET_OPTIONS.map(d => (
+                  <button
+                    key={d}
+                    onClick={() => set('diet_type', form.diet_type === d ? '' : d)}
+                    className="px-3 py-1.5 rounded-full text-sm font-medium transition-all"
+                    style={{
+                      background: form.diet_type === d ? 'var(--accent)' : 'var(--bg-input)',
+                      color: form.diet_type === d ? '#0D1117' : 'var(--text-secondary)',
+                      border: `1px solid ${form.diet_type === d ? 'var(--accent)' : 'var(--border)'}`,
+                    }}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+              {form.diet_type === 'Other' && (
+                <div>
+                  <label className="label">Describe your diet <span style={{ color: 'var(--text-muted)' }}>(max 20 chars)</span></label>
+                  <input className="input-base" placeholder="e.g. Raw food, OMAD..." maxLength={20} value={form.diet_custom} onChange={e => set('diet_custom', e.target.value)} />
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button className="btn-secondary flex-1" onClick={() => setStep(2)}>← Back</button>
+                <button className="btn-primary flex-1" onClick={() => setStep(4)}>Next →</button>
+              </div>
+              <button className="btn-secondary w-full text-sm" onClick={() => setStep(4)} style={{ opacity: 0.6 }}>Skip for now</button>
+            </div>
+          )}
+
+          {/* Step 4 — Height optional + finish */}
+          {step === 4 && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                Almost done!
+              </h2>
+              <div>
+                <label className="label">Height (optional)</label>
+                <input className="input-base" type="number" step="0.1" placeholder={unit === 'lbs' ? 'inches (e.g. 70)' : 'cm (e.g. 175)'} value={form.height} onChange={e => set('height', e.target.value)} />
+              </div>
+              <div className="p-3 rounded-xl" style={{ background: 'var(--accent-subtle)', border: '1px solid rgba(45,212,191,0.2)' }}>
+                <p className="text-xs font-medium mb-1" style={{ color: 'var(--accent-text)' }}>Your setup summary</p>
+                <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  {form.display_name} · {form.start_weight} → {form.goal_weight} {unit} · {parseInt(form.daily_step_goal).toLocaleString()} steps/day
+                  {form.diet_type ? ` · ${form.diet_type === 'Other' && form.diet_custom ? form.diet_custom : form.diet_type}` : ''}
+                </p>
+              </div>
+              {error && <p className="text-xs" style={{ color: 'var(--danger)' }}>{error}</p>}
+              <div className="flex gap-2">
+                <button className="btn-secondary flex-1" onClick={() => setStep(3)}>← Back</button>
+                <button className="btn-primary flex-1" onClick={() => setStep(5)}>Next →</button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 5 — App tour + install */}
+          {step === 5 && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                Here's what's waiting for you
+              </h2>
+              <div className="space-y-3">
+                {[
+                  { icon: "📈", tab: "Progress", desc: "Log your weight and steps daily. See your trend line, streak, and how far you've come." },
+                  { icon: "🎯", tab: "Goals", desc: "Set your goal weight and daily steps. Your private journal lives here too." },
+                  { icon: "💬", tab: "Chat", desc: "Live community + 5 AI coaches. Type @coach to ask anything about fitness, nutrition, or mindset." },
+                  { icon: "👤", tab: "Profile", desc: "Your public journey page. Share it. Let people follow your progress." },
+                ].map(item => (
+                  <div key={item.tab} className="flex items-start gap-3 p-3 rounded-xl" style={{ background: 'var(--bg-input)', border: '1px solid var(--border)' }}>
+                    <span className="text-xl flex-shrink-0">{item.icon}</span>
+                    <div>
+                      <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-display)' }}>{item.tab}</p>
+                      <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)', lineHeight: 1.5 }}>{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="p-3 rounded-xl" style={{ background: 'rgba(45,212,191,0.06)', border: '1px solid rgba(45,212,191,0.2)' }}>
+                <p className="text-xs font-semibold mb-1" style={{ color: 'var(--accent)' }}>📱 Add Nuroni to your home screen</p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                  <strong style={{ color: 'var(--text-secondary)' }}>iPhone:</strong> Tap the Share button in Safari → "Add to Home Screen"<br />
+                  <strong style={{ color: 'var(--text-secondary)' }}>Android:</strong> Tap the browser menu (⋮) → "Add to Home Screen"<br />
+                  Works like a native app — no App Store needed.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button className="btn-secondary flex-1" onClick={() => setStep(4)}>← Back</button>
+                <button className="btn-primary flex-1" onClick={save} disabled={saving}>{saving ? 'Saving…' : "Let's go →"}</button>
+              </div>
+              {error && <p className="text-xs" style={{ color: 'var(--danger)' }}>{error}</p>}
+            </div>
+          )}
+
         </div>
-        {!isAdmin && <p className="text-xs mt-1.5 text-center" style={{ color: 'var(--text-muted)' }}>Use @coach to talk to an AI coach · No links or self-promotion</p>}
       </div>
     </div>
   )
