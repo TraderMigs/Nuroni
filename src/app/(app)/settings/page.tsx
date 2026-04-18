@@ -15,14 +15,22 @@ export default function SettingsPage() {
   const [proofPhotosPublic, setProofPhotosPublic] = useState(true)
   const [savingPrivacy, setSavingPrivacy] = useState(false)
   const [userId, setUserId] = useState('')
+  const [referralCode, setReferralCode] = useState('')
+  const [referralEnabled, setReferralEnabled] = useState(false)
+  const [referralCopied, setReferralCopied] = useState(false)
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
       setUserId(user.id)
-      const { data } = await supabase.from('profiles').select('proof_photos_public').eq('id', user.id).maybeSingle()
-      if (data) setProofPhotosPublic(data.proof_photos_public ?? true)
+      const { data } = await supabase.from('profiles').select('proof_photos_public, referral_code').eq('id', user.id).maybeSingle()
+      if (data) {
+        setProofPhotosPublic(data.proof_photos_public ?? true)
+        setReferralCode(data.referral_code || '')
+      }
+      const { data: appSettings } = await supabase.from('app_settings').select('referral_enabled').eq('id', 1).maybeSingle()
+      setReferralEnabled(appSettings?.referral_enabled || false)
     }
     load()
   }, [supabase])
@@ -52,6 +60,13 @@ export default function SettingsPage() {
     router.push('/?deleted=1')
   }
 
+  async function copyReferral() {
+    const link = `${window.location.origin}/signup?ref=${referralCode}`
+    await navigator.clipboard.writeText(link)
+    setReferralCopied(true)
+    setTimeout(() => setReferralCopied(false), 2500)
+  }
+
   return (
     <div className="w-full max-w-lg mx-auto px-4 py-5 overflow-x-hidden">
       {toast && (
@@ -64,6 +79,21 @@ export default function SettingsPage() {
       </div>
 
       {/* Privacy */}
+      {referralCode && referralEnabled && (
+        <div className="card p-4 mb-4" style={{ border: '1px solid rgba(45,212,191,0.25)', background: 'rgba(45,212,191,0.03)' }}>
+          <h2 className="text-sm font-semibold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--accent)' }}>🎁 Give a friend a free month</h2>
+          <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>When a friend signs up with your link and subscribes, you earn a free month automatically.</p>
+          <div className="flex items-center gap-2">
+            <div className="flex-1 px-3 py-2 rounded-xl text-xs truncate" style={{ background: 'var(--bg-input)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+              nuroni.app/signup?ref={referralCode}
+            </div>
+            <button onClick={copyReferral} className="btn-primary py-2 px-3 text-xs flex-shrink-0">
+              {referralCopied ? 'Copied ✓' : 'Copy'}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="card p-4 mb-4">
         <h2 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Privacy</h2>
         <div className="flex items-center justify-between">
