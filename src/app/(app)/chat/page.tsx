@@ -500,7 +500,7 @@ export default function ChatPage() {
         stepMap[e.user_id] = (stepMap[e.user_id] || 0) + (e.steps || 0)
       })
 
-      function computeStreakLocal(userEntries: { created_at: string }[]): number {
+      const computeStreakLocal = (userEntries: { created_at: string }[]): number => {
         if (!userEntries.length) return 0
         const days = Array.from(new Set(userEntries.map(e => new Date(e.created_at).toDateString())))
         const today = new Date().toDateString()
