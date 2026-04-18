@@ -661,9 +661,8 @@ export default function ChatPage() {
         </button>
       </div>
 
-      {/* Today's Proofs strip */}
-      {todayProofs.length > 0 && (
-        <div className="mt-2">
+      {/* Today's Proofs strip — always visible */}
+      <div className="mt-2">
           <button
             onClick={() => setTodayProofsExpanded(v => !v)}
             className="w-full mx-0 px-4 py-2 flex items-center justify-between"
@@ -671,37 +670,50 @@ export default function ChatPage() {
           >
             <p className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
               📸 Today's Proof
-              <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
-                {todayProofs.length}
-              </span>
+              {todayProofs.length > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
+                  {todayProofs.length}
+                </span>
+              )}
             </p>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', transform: todayProofsExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
               <polyline points="6 9 12 15 18 9"/>
             </svg>
           </button>
           {todayProofsExpanded && (
-            <div className="flex gap-2 px-4 pb-2 overflow-x-auto animate-fade-in" style={{ scrollbarWidth: 'none' }}>
-              {todayProofs.map(proof => (
-                <div
-                  key={proof.id}
-                  className="flex-shrink-0 cursor-pointer"
-                  style={{ width: 72, position: 'relative' }}
-                  onClick={() => setFullscreenTodayPhoto(proof.photo_url)}
-                >
-                  <div style={{ width: 72, height: 72, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)' }}>
-                    <img src={proof.photo_url} alt={proof.category} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  </div>
-                  <div style={{ position: 'absolute', bottom: 4, left: 4 }}>
-                    <span style={{ fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 3, background: `${CATEGORY_COLORS[proof.category] || '#888'}cc`, color: '#fff' }}>
-                      {proof.category}
-                    </span>
-                  </div>
+            <div className="px-4 pb-2 animate-fade-in">
+              {todayProofs.length === 0 ? (
+                <div className="flex items-center gap-2 py-2">
+                  <span className="text-lg">📷</span>
+                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                    No proofs posted yet today — be the first!
+                    {' '}<span style={{ color: 'var(--accent)' }}>Tap the camera icon below to post yours.</span>
+                  </p>
                 </div>
-              ))}
+              ) : (
+                <div className="flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+                  {todayProofs.map(proof => (
+                    <div
+                      key={proof.id}
+                      className="flex-shrink-0 cursor-pointer"
+                      style={{ width: 72, position: 'relative' }}
+                      onClick={() => setFullscreenTodayPhoto(proof.photo_url)}
+                    >
+                      <div style={{ width: 72, height: 72, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)' }}>
+                        <img src={proof.photo_url} alt={proof.category} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      </div>
+                      <div style={{ position: 'absolute', bottom: 4, left: 4 }}>
+                        <span style={{ fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 3, background: `${CATEGORY_COLORS[proof.category] || '#888'}cc`, color: '#fff' }}>
+                          {proof.category}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
-      )}
 
       {/* Fullscreen today proof */}
       {fullscreenTodayPhoto && (
