@@ -37,6 +37,86 @@ function ThemeToggle() {
   )
 }
 
+// PWA Install Banner
+function PWAInstallBanner() {
+  const [show, setShow] = useState(false)
+  const [isIOS, setIsIOS] = useState(false)
+  const [deferredPrompt, setDeferredPrompt] = useState<Event & { prompt: () => void } | null>(null)
+
+  useEffect(() => {
+    // Don't show if already installed as PWA
+    if (window.matchMedia('(display-mode: standalone)').matches) return
+    // Don't show if already dismissed
+    if (localStorage.getItem('nuroni-pwa-dismissed')) return
+
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) && !(window as unknown as { MSStream: unknown }).MSStream
+    setIsIOS(ios)
+
+    if (ios) {
+      // Show iOS instructions banner after 3 seconds
+      setTimeout(() => setShow(true), 3000)
+    } else {
+      // Listen for Chrome/Android install prompt
+      const handler = (e: Event) => {
+        e.preventDefault()
+        setDeferredPrompt(e as Event & { prompt: () => void })
+        setTimeout(() => setShow(true), 3000)
+      }
+      window.addEventListener('beforeinstallprompt', handler)
+      return () => window.removeEventListener('beforeinstallprompt', handler)
+    }
+  }, [])
+
+  function dismiss() {
+    setShow(false)
+    localStorage.setItem('nuroni-pwa-dismissed', '1')
+  }
+
+  async function install() {
+    if (deferredPrompt) {
+      deferredPrompt.prompt()
+      setShow(false)
+      localStorage.setItem('nuroni-pwa-dismissed', '1')
+    }
+  }
+
+  if (!show) return null
+
+  return (
+    <div
+      className="flex-shrink-0 flex items-center justify-between gap-3 px-4 py-2.5 animate-fade-in"
+      style={{ background: 'rgba(45,212,191,0.08)', borderBottom: '1px solid rgba(45,212,191,0.2)' }}
+    >
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="text-sm flex-shrink-0">📱</span>
+        <p className="text-xs" style={{ color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+          {isIOS
+            ? <>Tap <strong style={{ color: 'var(--accent)' }}>Share</strong> → <strong style={{ color: 'var(--accent)' }}>Add to Home Screen</strong> to install Nuroni</>
+            : <>Add <strong style={{ color: 'var(--accent)' }}>Nuroni</strong> to your home screen for the full app experience</>
+          }
+        </p>
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        {!isIOS && deferredPrompt && (
+          <button
+            onClick={install}
+            className="text-xs px-2.5 py-1 rounded-lg font-semibold"
+            style={{ background: 'var(--accent)', color: '#0D1117', border: 'none', cursor: 'pointer' }}
+          >
+            Install
+          </button>
+        )}
+        <button
+          onClick={dismiss}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -144,6 +224,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </button>
         </div>
       </header>
+
+      <PWAInstallBanner />
 
       {/* Scrollable content area */}
       <main className={`flex-1 overflow-x-hidden page-enter w-full ${pathname === '/chat' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto pb-6'}`}>
