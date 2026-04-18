@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 
@@ -13,6 +14,12 @@ export default function SignupPage() {
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
   const supabase = createClient()
+  const searchParams = useSearchParams()
+
+  useEffect(() => {
+    const ref = searchParams.get('ref')
+    if (ref) localStorage.setItem('nuroni-referral-code', ref)
+  }, [searchParams])
 
   async function handleSignup() {
     if (!agreed) { setError('Please confirm you are 18+ and agree to our Terms and Privacy Policy.'); return }
@@ -26,6 +33,22 @@ export default function SignupPage() {
       setError(error.message)
       setLoading(false)
     } else {
+      // Track referral if a ref code was stored
+      const refCode = localStorage.getItem('nuroni-referral-code')
+      if (refCode) {
+        try {
+          // Get the new user ID
+          const { data: { user } } = await supabase.auth.getUser()
+          if (user) {
+            await fetch('/api/referral/track', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ referral_code: refCode, new_user_id: user.id }),
+            })
+            localStorage.removeItem('nuroni-referral-code')
+          }
+        } catch {}
+      }
       window.location.href = '/onboarding'
     }
   }
