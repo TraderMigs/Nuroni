@@ -71,6 +71,15 @@ export async function POST(req: NextRequest) {
         p_stripe_customer_id: customerId,
         p_stripe_subscription_id: subId,
       })
+
+      // Trigger referral reward — non-blocking, won't fail the webhook
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://www.nuroni.app'
+      fetch(`${appUrl}/api/referral/convert`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId }),
+      }).catch(() => {})
+
       break
     }
 
