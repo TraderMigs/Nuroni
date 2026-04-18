@@ -253,10 +253,10 @@ export default function OnboardingPage() {
               </h2>
               <div className="space-y-3">
                 {[
-                  { icon: '📈', tab: 'Progress', desc: 'Log your weight and steps daily. See your trend line, streak, and how far you've come.' },
-                  { icon: '🎯', tab: 'Goals', desc: 'Set your goal weight and daily steps. Your private journal lives here too.' },
-                  { icon: '💬', tab: 'Chat', desc: 'Live community + 5 AI coaches. Type @coach to ask anything about fitness, nutrition, or mindset.' },
-                  { icon: '👤', tab: 'Profile', desc: 'Your public journey page. Share it. Let people follow your progress.' },
+                  { icon: "📈", tab: "Progress", desc: "Log your weight and steps daily. See your trend line, streak, and how far you've come." },
+                  { icon: "🎯", tab: "Goals", desc: "Set your goal weight and daily steps. Your private journal lives here too." },
+                  { icon: "💬", tab: "Chat", desc: "Live community + 5 AI coaches. Type @coach to ask anything about fitness, nutrition, or mindset." },
+                  { icon: "👤", tab: "Profile", desc: "Your public journey page. Share it. Let people follow your progress." },
                 ].map(item => (
                   <div key={item.tab} className="flex items-start gap-3 p-3 rounded-xl" style={{ background: 'var(--bg-input)', border: '1px solid var(--border)' }}>
                     <span className="text-xl flex-shrink-0">{item.icon}</span>
