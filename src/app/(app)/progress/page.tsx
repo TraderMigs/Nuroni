@@ -130,6 +130,8 @@ export default function ProgressPage() {
   const [activitiesInput, setActivitiesInput] = useState<string[]>([])
   const [exportLoading, setExportLoading] = useState(false)
   const [showShareCard, setShowShareCard] = useState(false)
+  const [shareCardFact, setShareCardFact] = useState('')
+  const [shareCardFactLoading, setShareCardFactLoading] = useState(false)
   const [nudgeDismissed, setNudgeDismissed] = useState(false)
   const [logDate, setLogDate] = useState(getTodayLocal())
 
@@ -278,10 +280,37 @@ export default function ProgressPage() {
     } else { copyLink() }
   }
 
+  async function openShareCard() {
+    setShowShareCard(true)
+    if (!shareCardFact && !shareCardFactLoading) {
+      const totalSteps = entries.reduce((sum, e) => sum + (e.steps || 0), 0)
+      if (totalSteps > 0) {
+        setShareCardFactLoading(true)
+        try {
+          const res = await fetch('/api/steps-fact', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ total_steps: totalSteps }),
+          })
+          const data = await res.json()
+          if (data.fact) setShareCardFact(data.fact)
+        } catch {}
+        setShareCardFactLoading(false)
+      }
+    }
+  }
+
   async function downloadShareCard() {
     if (!profile) return
     setToast('Generating card...')
-    const url = `/api/share-card?username=${profile.username}`
+    const totalSteps = entries.reduce((sum, e) => sum + (e.steps || 0), 0)
+    const params = new URLSearchParams({
+      username: profile.username,
+      streak: String(streak),
+      steps: String(totalSteps),
+      ...(shareCardFact ? { fact: shareCardFact } : {}),
+    })
+    const url = `/api/share-card?${params.toString()}`
     const res = await fetch(url)
     const blob = await res.blob()
     const objectUrl = URL.createObjectURL(blob)
@@ -402,7 +431,7 @@ export default function ProgressPage() {
             </svg>
             Copy
           </button>
-          <button onClick={() => setShowShareCard(true)} className="btn-primary py-2 px-3 text-sm gap-1.5">
+          <button onClick={openShareCard} className="btn-primary py-2 px-3 text-sm gap-1.5">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
               <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
@@ -418,10 +447,12 @@ export default function ProgressPage() {
             <h3 className="text-base font-bold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
               Share your progress
             </h3>
-            <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>Choose how you want to share</p>
+            <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+              {shareCardFactLoading ? 'Generating your card...' : 'Choose how you want to share'}
+            </p>
             <div className="rounded-xl overflow-hidden mb-4 border" style={{ borderColor: 'var(--border)' }}>
               <img
-                src={`/api/share-card?username=${profile.username}`}
+                src={`/api/share-card?username=${profile.username}&streak=${streak}&steps=${entries.reduce((s,e)=>s+(e.steps||0),0)}${shareCardFact ? '&fact=' + encodeURIComponent(shareCardFact) : ''}`}
                 alt="Progress card preview"
                 style={{ width: '100%', height: 'auto', display: 'block' }}
               />
