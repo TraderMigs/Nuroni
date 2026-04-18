@@ -181,6 +181,9 @@ export default function ChatPage() {
 
   const [canPostProof, setCanPostProof] = useState<boolean | null>(null)
   const [nextAllowedAt, setNextAllowedAt] = useState<string | null>(null)
+  const [todayProofs, setTodayProofs] = useState<{ id: string; photo_url: string; category: string; user_id: string; display_name?: string }[]>([])
+  const [todayProofsExpanded, setTodayProofsExpanded] = useState(false)
+  const [fullscreenTodayPhoto, setFullscreenTodayPhoto] = useState<string | null>(null)
   const [showCategoryPicker, setShowCategoryPicker] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [proofToast, setProofToast] = useState('')
@@ -294,6 +297,22 @@ export default function ChatPage() {
           setMessages(prev => prev.map(m => mergeProfile(m, cache[m.user_id])))
         })
         setTimeout(() => loadHeartStates(initialMsgs, user.id), 200)
+      }
+
+      // Load today's proofs from all users
+      const todayStart = new Date()
+      todayStart.setHours(0, 0, 0, 0)
+      const { data: allTodayProofs } = await supabase
+        .from('proof_photos')
+        .select('id, photo_url, category, user_id')
+        .gte('created_at', todayStart.toISOString())
+        .order('created_at', { ascending: false })
+      if (allTodayProofs && allTodayProofs.length > 0) {
+        const profileIds = Array.from(new Set(allTodayProofs.map(p => p.user_id)))
+        const { data: proofProfiles } = await supabase.from('profiles').select('id, display_name').in('id', profileIds)
+        const nameMap: Record<string, string> = {}
+        proofProfiles?.forEach(p => { nameMap[p.id] = p.display_name })
+        setTodayProofs(allTodayProofs.map(p => ({ ...p, display_name: nameMap[p.user_id] || 'Member' })))
       }
 
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
