@@ -66,7 +66,19 @@ export default function OnboardingPage() {
       daily_step_goal: parseInt(form.daily_step_goal),
     })
 
-    router.push('/progress')
+    // Insert a personal welcome message from Coach Maya
+    const coachMayaId = '00000000-0000-0000-0000-000000000001'
+    const name = form.display_name || 'there'
+    await supabase.from('messages').insert({
+      user_id: coachMayaId,
+      content: `Hey ${name}! I'm Coach Maya. I'm here to help you with your fat loss and step goals. Type @coach any time you have a question, or just start chatting — I've got you. Welcome to Nuroni! 💪`,
+      media_url: null,
+      media_type: null,
+      quick_replies: ['What should I focus on first?', 'How many steps should I walk?', 'Tell me more about this app'],
+      reply_to_user_id: user.id,
+    })
+
+    router.push('/chat')
   }
 
   const unit = form.weight_unit
