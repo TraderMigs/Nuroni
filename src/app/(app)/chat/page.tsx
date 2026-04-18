@@ -166,6 +166,7 @@ export default function ChatPage() {
   const [followLoading, setFollowLoading] = useState(false)
   const [showTip, setShowTip] = useState(false)
   const [showCoachTip, setShowCoachTip] = useState(false)
+  const [showWelcomeBanner, setShowWelcomeBanner] = useState(false)
   const [usedQuickReplies, setUsedQuickReplies] = useState<Set<string>>(() => {
     try {
       const stored = localStorage.getItem('nuroni-used-pills')
@@ -261,6 +262,9 @@ export default function ChatPage() {
 
       const coachTipSeen = localStorage.getItem('nuroni-coach-tip')
       if (!coachTipSeen) setShowCoachTip(true)
+
+      const welcomeSeen = localStorage.getItem('nuroni-welcome-banner')
+      if (!welcomeSeen) setShowWelcomeBanner(true)
 
       const { data: follows } = await supabase
         .from('follows').select('following_id').eq('follower_id', user.id)
@@ -426,6 +430,7 @@ export default function ChatPage() {
 
   function dismissTip() { setShowTip(false); localStorage.setItem('nuroni-chat-tip', '1') }
   function dismissCoachTip() { setShowCoachTip(false); localStorage.setItem('nuroni-coach-tip', '1') }
+  function dismissWelcomeBanner() { setShowWelcomeBanner(false); localStorage.setItem('nuroni-welcome-banner', '1') }
 
   async function toggleHeart(photoId: string) {
     if (!userId) return
@@ -577,6 +582,23 @@ export default function ChatPage() {
         <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: 'var(--accent)', color: '#0D1117' }}>Live</span>
       </div>
 
+      {showWelcomeBanner && (
+        <div className="mx-4 mt-2 px-4 py-3 rounded-xl animate-fade-in" style={{ background: 'rgba(45,212,191,0.06)', border: '1px solid rgba(45,212,191,0.2)' }}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1">
+              <p className="text-xs font-semibold mb-1" style={{ color: 'var(--accent)', fontFamily: 'var(--font-display)' }}>Welcome to Fitness Chat 👋</p>
+              <p className="text-xs" style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                This is a live community for Plus+ members. Chat with real people on real journeys.
+                Type <strong style={{ color: 'var(--accent)' }}>@coach</strong> to talk to an AI fitness coach — they reply fast.
+              </p>
+            </div>
+            <button onClick={dismissWelcomeBanner} style={{ color: 'var(--text-muted)', flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', paddingTop: 2 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       {showTip && (
         <div className="mx-4 mt-2 px-4 py-3 rounded-xl flex items-center justify-between gap-3 animate-fade-in" style={{ background: 'var(--accent-subtle)', border: '1px solid rgba(45,212,191,0.3)' }}>
           <p className="text-xs" style={{ color: 'var(--accent-text)', lineHeight: 1.5 }}>Tap any name to check their stats and follow their journey.</p>
@@ -599,10 +621,39 @@ export default function ChatPage() {
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {messages.length === 0 && (
-          <div className="text-center py-12">
-            <div className="text-3xl mb-3">👋</div>
-            <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>Be the first to say something!</p>
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Ask about workouts, meal plans, progress — anything fitness.</p>
+          <div className="py-8 space-y-3">
+            <div className="text-center mb-4">
+              <div className="text-3xl mb-2">💬</div>
+              <p className="text-sm font-semibold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                You're in. Say something.
+              </p>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                Real people, real journeys — and 5 AI coaches ready when you need them.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-2 mx-2">
+              {[
+                { emoji: '🏋️', name: 'Coach Maya', specialty: 'Fat Loss & Steps', prompt: '@coach how many steps should I walk per day?' },
+                { emoji: '🥗', name: 'Coach Nova', specialty: 'Nutrition & Diet', prompt: '@coach what should I eat after a workout?' },
+                { emoji: '🔥', name: 'Coach Blaze', specialty: 'Mindset & Motivation', prompt: '@coach I keep skipping my workouts, help.' },
+              ].map(c => (
+                <button
+                  key={c.name}
+                  onClick={() => setInput(c.prompt)}
+                  className="flex items-center gap-3 p-3 rounded-xl text-left transition-all"
+                  style={{ background: 'rgba(167,139,250,0.06)', border: '1px solid rgba(167,139,250,0.15)', cursor: 'pointer' }}
+                >
+                  <span className="text-xl flex-shrink-0">{c.emoji}</span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold" style={{ color: '#a78bfa' }}>{c.name} <span style={{ color: 'rgba(167,139,250,0.6)', fontWeight: 400 }}>· {c.specialty}</span></p>
+                    <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{c.prompt}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-center mt-3" style={{ color: 'var(--text-muted)' }}>
+              Or just type anything — the community is live.
+            </p>
           </div>
         )}
 
