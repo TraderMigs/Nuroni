@@ -159,9 +159,17 @@ export default function AdminPage() {
 
   async function saveSettings(newReferralEnabled: boolean) {
     setSavingSettings(true)
-    setReferralEnabled(newReferralEnabled)
-    await supabase.from('app_settings').update({ referral_enabled: newReferralEnabled, updated_at: new Date().toISOString() }).eq('id', 1)
-    setToast(newReferralEnabled ? 'Referral feature enabled ✓' : 'Referral feature disabled ✓')
+    const res = await fetch('/api/admin/app-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ referral_enabled: newReferralEnabled }),
+    })
+    if (res.ok) {
+      setReferralEnabled(newReferralEnabled)
+      setToast(newReferralEnabled ? 'Referral feature enabled ✓' : 'Referral feature disabled ✓')
+    } else {
+      setToast('Failed to save — try again')
+    }
     setSavingSettings(false)
   }
 
