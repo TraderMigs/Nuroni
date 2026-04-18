@@ -37,7 +37,9 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
   const [search, setSearch] = useState('')
-  const [tab, setTab] = useState<'overview' | 'users' | 'chat'>('overview')
+  const [tab, setTab] = useState<'overview' | 'users' | 'chat' | 'settings'>('overview')
+  const [referralEnabled, setReferralEnabled] = useState(false)
+  const [savingSettings, setSavingSettings] = useState(false)
   const [recentMessages, setRecentMessages] = useState<{id: string; content: string; display_name: string; created_at: string}[]>([])
   const [deletingMsg, setDeletingMsg] = useState<string | null>(null)
 
@@ -53,6 +55,10 @@ export default function AdminPage() {
 
     if (!profile?.is_admin) { setAuthorized(false); return }
     setAuthorized(true)
+
+    // Load app settings
+    const { data: appSettings } = await supabase.from('app_settings').select('referral_enabled').eq('id', 1).maybeSingle()
+    if (appSettings) setReferralEnabled(appSettings.referral_enabled || false)
 
     // Load all users
     const { data: allUsers } = await supabase
@@ -151,6 +157,14 @@ export default function AdminPage() {
     </div>
   )
 
+  async function saveSettings(newReferralEnabled: boolean) {
+    setSavingSettings(true)
+    setReferralEnabled(newReferralEnabled)
+    await supabase.from('app_settings').update({ referral_enabled: newReferralEnabled, updated_at: new Date().toISOString() }).eq('id', 1)
+    setToast(newReferralEnabled ? 'Referral feature enabled ✓' : 'Referral feature disabled ✓')
+    setSavingSettings(false)
+  }
+
   if (authorized === false) return (
     <div className="flex items-center justify-center min-h-screen">
       <p style={{ color: 'var(--text-muted)' }}>Access denied.</p>
@@ -177,7 +191,7 @@ export default function AdminPage() {
 
       {/* Tabs */}
       <div className="flex gap-2 mb-5 border-b" style={{ borderColor: 'var(--border)' }}>
-        {(['overview', 'users', 'chat'] as const).map(t => (
+        {(['overview', 'users', 'chat', 'settings'] as const).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -323,6 +337,42 @@ export default function AdminPage() {
               </button>
             </div>
           ))}
+        </div>
+      )}
+      {tab === 'settings' && (
+        <div className="space-y-4">
+          <div className="card p-5">
+            <h2 className="text-sm font-semibold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Referral Program</h2>
+            <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+              When enabled, users see a referral card on their profile page with a unique link.
+              When a friend signs up and subscribes, the referrer earns 1 free month automatically.
+            </p>
+            <div className="flex items-center justify-between p-3 rounded-xl" style={{ background: 'var(--bg-input)' }}>
+              <div>
+                <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Referral card visible to users</p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>Reward: 1 free month per successful referral (hardcoded)</p>
+              </div>
+              <button
+                onClick={() => saveSettings(!referralEnabled)}
+                disabled={savingSettings}
+                style={{
+                  background: referralEnabled ? 'var(--accent)' : 'var(--border)',
+                  width: 44, height: 26, borderRadius: 999,
+                  position: 'relative', border: 'none',
+                  cursor: 'pointer', transition: 'background 0.2s', flexShrink: 0
+                }}
+              >
+                <div style={{
+                  position: 'absolute', top: 3, width: 20, height: 20,
+                  background: 'white', borderRadius: '50%',
+                  transition: 'left 0.2s', left: referralEnabled ? '21px' : '3px'
+                }} />
+              </button>
+            </div>
+            <div className="mt-3 p-3 rounded-xl text-xs" style={{ background: referralEnabled ? 'rgba(45,212,191,0.08)' : 'rgba(239,68,68,0.06)', color: referralEnabled ? 'var(--accent-text)' : 'var(--danger)' }}>
+              Status: {referralEnabled ? '✓ Active — users can see and share their referral link' : '✗ Inactive — referral card is hidden from all users'}
+            </div>
+          </div>
         </div>
       )}
     </div>
