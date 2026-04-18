@@ -166,6 +166,24 @@ export default function ProfilePage() {
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Your identity and setup</p>
       </div>
 
+      {referralCode && referralEnabled && (
+        <div className="card p-4 mb-4" style={{ border: '1px solid rgba(45,212,191,0.2)', background: 'rgba(45,212,191,0.03)' }}>
+          {referralToast && <div className="toast mb-2">{referralToast}</div>}
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div>
+              <p className="text-sm font-bold" style={{ color: 'var(--accent)', fontFamily: 'var(--font-display)' }}>🎁 Give a friend a free month</p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>Share your link — when they subscribe, you earn a free month too.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex-1 px-3 py-2 rounded-xl text-xs truncate" style={{ background: 'var(--bg-input)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+              nuroni.app/signup?ref={referralCode}
+            </div>
+            <button onClick={copyReferral} className="btn-primary py-2 px-3 text-xs flex-shrink-0">Copy</button>
+          </div>
+        </div>
+      )}
+
       {/* Subscription status */}
       {isPlus ? (
         <div className="card p-4 mb-4 flex items-center justify-between" style={{ border: '1.5px solid var(--accent)' }}>
@@ -200,23 +218,7 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {referralCode && referralEnabled && (
-        <div className="card p-4 mb-4" style={{ border: '1px solid rgba(45,212,191,0.2)', background: 'rgba(45,212,191,0.03)' }}>
-          {referralToast && <div className="toast mb-2">{referralToast}</div>}
-          <div className="flex items-start justify-between gap-3 mb-2">
-            <div>
-              <p className="text-sm font-bold" style={{ color: 'var(--accent)', fontFamily: 'var(--font-display)' }}>🎁 Give a friend a free month</p>
-              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>Share your link — when they subscribe, you earn a free month too.</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex-1 px-3 py-2 rounded-xl text-xs truncate" style={{ background: 'var(--bg-input)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-              nuroni.app/signup?ref={referralCode}
-            </div>
-            <button onClick={copyReferral} className="btn-primary py-2 px-3 text-xs flex-shrink-0">Copy</button>
-          </div>
-        </div>
-      )}
+
 
       <div className="card p-5 space-y-4">
         <div>
