@@ -166,7 +166,6 @@ export default function ChatPage() {
   const [followLoading, setFollowLoading] = useState(false)
   const [showTip, setShowTip] = useState(false)
   const [showCoachTip, setShowCoachTip] = useState(false)
-  const [showWelcomeBanner, setShowWelcomeBanner] = useState(false)
   const [usedQuickReplies, setUsedQuickReplies] = useState<Set<string>>(() => {
     try {
       const stored = localStorage.getItem('nuroni-used-pills')
@@ -187,6 +186,21 @@ export default function ChatPage() {
   const [proofToast, setProofToast] = useState('')
 
   const countdown = useCountdown(canPostProof === false ? nextAllowedAt : null)
+
+  // Coach of the Day — rotates daily based on day of year
+  const coachOfDayId = (() => {
+    const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000)
+    const ids = [
+      '00000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000002',
+      '00000000-0000-0000-0000-000000000003',
+      '00000000-0000-0000-0000-000000000004',
+      '00000000-0000-0000-0000-000000000005',
+    ]
+    return ids[dayOfYear % ids.length]
+  })()
+  const coachOfDayName = COACH_NAMES[coachOfDayId] || 'Coach'
+  const coachOfDaySpecialty = COACH_SPECIALTIES[coachOfDayId] || ''
 
   const fetchProfiles = useCallback(async (userIds: string[]) => {
     const { data: profiles } = await supabase
@@ -263,9 +277,6 @@ export default function ChatPage() {
       const coachTipSeen = localStorage.getItem('nuroni-coach-tip')
       if (!coachTipSeen) setShowCoachTip(true)
 
-      const welcomeSeen = localStorage.getItem('nuroni-welcome-banner')
-      if (!welcomeSeen) setShowWelcomeBanner(true)
-
       const { data: follows } = await supabase
         .from('follows').select('following_id').eq('follower_id', user.id)
       setFollowedIds(new Set(Array.from(follows?.map(f => f.following_id) || [])))
@@ -330,6 +341,12 @@ export default function ChatPage() {
         if (newMsg.media_type === 'proof_photo') {
           const pid = extractPhotoId(newMsg)
           if (pid) setHeartState(prev => ({ ...prev, [pid]: { count: 0, hearted: false } }))
+          // Add to today's proofs strip
+          const cat = newMsg.payload?.category || (newMsg.content?.startsWith('proof_category:') ? newMsg.content.replace('proof_category:', '').trim() : 'Other')
+          setTodayProofs(prev => {
+            if (prev.find(p => p.id === pid)) return prev
+            return [{ id: pid || newMsg.id, photo_url: newMsg.media_url || '', category: cat, user_id: newMsg.user_id }, ...prev]
+          })
         }
         // Set active coach when a coach replies — checked against userId via state setter
         if (COACH_IDS.has(newMsg.user_id) && newMsg.reply_to_user_id) {
@@ -430,7 +447,6 @@ export default function ChatPage() {
 
   function dismissTip() { setShowTip(false); localStorage.setItem('nuroni-chat-tip', '1') }
   function dismissCoachTip() { setShowCoachTip(false); localStorage.setItem('nuroni-coach-tip', '1') }
-  function dismissWelcomeBanner() { setShowWelcomeBanner(false); localStorage.setItem('nuroni-welcome-banner', '1') }
 
   async function toggleHeart(photoId: string) {
     if (!userId) return
@@ -582,23 +598,6 @@ export default function ChatPage() {
         <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: 'var(--accent)', color: '#0D1117' }}>Live</span>
       </div>
 
-      {showWelcomeBanner && (
-        <div className="mx-4 mt-2 px-4 py-3 rounded-xl animate-fade-in" style={{ background: 'rgba(45,212,191,0.06)', border: '1px solid rgba(45,212,191,0.2)' }}>
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1">
-              <p className="text-xs font-semibold mb-1" style={{ color: 'var(--accent)', fontFamily: 'var(--font-display)' }}>Welcome to Fitness Chat 👋</p>
-              <p className="text-xs" style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                This is a live community for Plus+ members. Chat with real people on real journeys.
-                Type <strong style={{ color: 'var(--accent)' }}>@coach</strong> to talk to an AI fitness coach — they reply fast.
-              </p>
-            </div>
-            <button onClick={dismissWelcomeBanner} style={{ color: 'var(--text-muted)', flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', paddingTop: 2 }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-          </div>
-        </div>
-      )}
-
       {showTip && (
         <div className="mx-4 mt-2 px-4 py-3 rounded-xl flex items-center justify-between gap-3 animate-fade-in" style={{ background: 'var(--accent-subtle)', border: '1px solid rgba(45,212,191,0.3)' }}>
           <p className="text-xs" style={{ color: 'var(--accent-text)', lineHeight: 1.5 }}>Tap any name to check their stats and follow their journey.</p>
@@ -619,41 +618,88 @@ export default function ChatPage() {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-        {messages.length === 0 && (
-          <div className="py-8 space-y-3">
-            <div className="text-center mb-4">
-              <div className="text-3xl mb-2">💬</div>
-              <p className="text-sm font-semibold mb-1" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-                You're in. Say something.
-              </p>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                Real people, real journeys — and 5 AI coaches ready when you need them.
-              </p>
-            </div>
-            <div className="grid grid-cols-1 gap-2 mx-2">
-              {[
-                { emoji: '🏋️', name: 'Coach Maya', specialty: 'Fat Loss & Steps', prompt: '@coach how many steps should I walk per day?' },
-                { emoji: '🥗', name: 'Coach Nova', specialty: 'Nutrition & Diet', prompt: '@coach what should I eat after a workout?' },
-                { emoji: '🔥', name: 'Coach Blaze', specialty: 'Mindset & Motivation', prompt: '@coach I keep skipping my workouts, help.' },
-              ].map(c => (
-                <button
-                  key={c.name}
-                  onClick={() => setInput(c.prompt)}
-                  className="flex items-center gap-3 p-3 rounded-xl text-left transition-all"
-                  style={{ background: 'rgba(167,139,250,0.06)', border: '1px solid rgba(167,139,250,0.15)', cursor: 'pointer' }}
+      {/* Coach of the Day */}
+      <div className="mx-4 mt-2 px-3 py-2.5 rounded-xl flex items-center justify-between gap-3" style={{ background: 'rgba(167,139,250,0.06)', border: '1px solid rgba(167,139,250,0.15)' }}>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-sm">⭐</span>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+            <span style={{ color: '#a78bfa', fontWeight: 600 }}>Coach of the day: {coachOfDayName}</span>
+            <span style={{ color: 'var(--text-muted)' }}> · {coachOfDaySpecialty}</span>
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            setActiveCoachId(coachOfDayId)
+            setLastUserMsgAt(Date.now())
+            setShowCoachKeepPrompt(false)
+            setOtherHint(`Chatting with ${coachOfDayName}...`)
+            setTimeout(() => inputRef.current?.focus(), 50)
+          }}
+          className="text-xs px-2.5 py-1 rounded-lg font-semibold flex-shrink-0"
+          style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.3)', cursor: 'pointer' }}
+        >
+          Ask
+        </button>
+      </div>
+
+      {/* Today's Proofs strip */}
+      {todayProofs.length > 0 && (
+        <div className="mt-2">
+          <button
+            onClick={() => setTodayProofsExpanded(v => !v)}
+            className="w-full mx-0 px-4 py-2 flex items-center justify-between"
+            style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+          >
+            <p className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
+              📸 Today's Proof
+              <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
+                {todayProofs.length}
+              </span>
+            </p>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', transform: todayProofsExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          {todayProofsExpanded && (
+            <div className="flex gap-2 px-4 pb-2 overflow-x-auto animate-fade-in" style={{ scrollbarWidth: 'none' }}>
+              {todayProofs.map(proof => (
+                <div
+                  key={proof.id}
+                  className="flex-shrink-0 cursor-pointer"
+                  style={{ width: 72, position: 'relative' }}
+                  onClick={() => setFullscreenTodayPhoto(proof.photo_url)}
                 >
-                  <span className="text-xl flex-shrink-0">{c.emoji}</span>
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold" style={{ color: '#a78bfa' }}>{c.name} <span style={{ color: 'rgba(167,139,250,0.6)', fontWeight: 400 }}>· {c.specialty}</span></p>
-                    <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{c.prompt}</p>
+                  <div style={{ width: 72, height: 72, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)' }}>
+                    <img src={proof.photo_url} alt={proof.category} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   </div>
-                </button>
+                  <div style={{ position: 'absolute', bottom: 4, left: 4 }}>
+                    <span style={{ fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 3, background: `${CATEGORY_COLORS[proof.category] || '#888'}cc`, color: '#fff' }}>
+                      {proof.category}
+                    </span>
+                  </div>
+                </div>
               ))}
             </div>
-            <p className="text-xs text-center mt-3" style={{ color: 'var(--text-muted)' }}>
-              Or just type anything — the community is live.
-            </p>
+          )}
+        </div>
+      )}
+
+      {/* Fullscreen today proof */}
+      {fullscreenTodayPhoto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.92)' }} onClick={() => setFullscreenTodayPhoto(null)}>
+          <button onClick={() => setFullscreenTodayPhoto(null)} style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'white' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+          <img src={fullscreenTodayPhoto} alt="Proof" style={{ maxWidth: '95vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 12 }} onClick={e => e.stopPropagation()} />
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+        {messages.length === 0 && (
+          <div className="text-center py-12">
+            <div className="text-3xl mb-3">👋</div>
+            <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>Be the first to say something!</p>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Ask about workouts, meal plans, progress — anything fitness.</p>
           </div>
         )}
 
