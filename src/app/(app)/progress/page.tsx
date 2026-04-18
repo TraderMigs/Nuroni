@@ -105,6 +105,12 @@ function daysSinceLastEntry(entries: Entry[]): number | null {
   return Math.floor((now.getTime() - last.getTime()) / 86400000)
 }
 
+function getMaxBackdate(): string {
+  const d = new Date()
+  d.setDate(d.getDate() - 7)
+  return d.toISOString().split('T')[0]
+}
+
 function getTodayLocal(): string {
   return new Date().toISOString().split('T')[0]
 }
@@ -130,6 +136,17 @@ export default function ProgressPage() {
   const [weightInput, setWeightInput] = useState('')
   const [stepsInput, setStepsInput] = useState('')
   const [distanceInput, setDistanceInput] = useState('')
+  const [stepsExpanded, setStepsExpanded] = useState(false)
+  const [lifetimeFact, setLifetimeFact] = useState('')
+  const [lifetimeFactLoading, setLifetimeFactLoading] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editWeight, setEditWeight] = useState('')
+  const [editSteps, setEditSteps] = useState('')
+  const [editNote, setEditNote] = useState('')
+  const [editActivities, setEditActivities] = useState<string[]>([])
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -187,6 +204,72 @@ export default function ProgressPage() {
       await load()
     }
     setSaving(false)
+  }
+
+  async function fetchLifetimeFact(totalSteps: number) {
+    if (lifetimeFact || lifetimeFactLoading) return
+    setLifetimeFactLoading(true)
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5',
+          max_tokens: 120,
+          messages: [{
+            role: 'user',
+            content: `I have walked ${totalSteps.toLocaleString()} steps total. Give me ONE fun, real-world distance comparison — like "you could have walked from NYC to Philadelphia" or "that's the length of the Great Wall of China 0.4 times". Use real, accurate distances. Keep it to 1 sentence, enthusiastic, no markdown.`
+          }]
+        })
+      })
+      const data = await res.json()
+      const text = data.content?.[0]?.text?.trim()
+      if (text) setLifetimeFact(text)
+    } catch { setLifetimeFact('Keep walking — every step adds up!') }
+    setLifetimeFactLoading(false)
+  }
+
+  function startEdit(entry: Entry) {
+    setEditingId(entry.id)
+    setEditWeight(String(entry.weight))
+    setEditSteps(String(entry.steps || ''))
+    setEditNote(entry.note || '')
+    setEditActivities(entry.activities || [])
+    setShowDeleteConfirm(null)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setShowDeleteConfirm(null)
+  }
+
+  async function saveEdit(entryId: string) {
+    if (!editWeight) return
+    setSavingEdit(true)
+    const { error } = await supabase.from('entries').update({
+      weight: parseFloat(editWeight),
+      steps: editSteps ? parseInt(editSteps) : 0,
+      note: editNote || null,
+      activities: editActivities.length > 0 ? editActivities : null,
+    }).eq('id', entryId)
+    if (!error) {
+      setToast('Entry updated!')
+      setEditingId(null)
+      await load()
+    }
+    setSavingEdit(false)
+  }
+
+  async function deleteEntry(entryId: string) {
+    setDeletingId(entryId)
+    const { error } = await supabase.from('entries').delete().eq('id', entryId)
+    if (!error) {
+      setToast('Entry deleted')
+      setEditingId(null)
+      setShowDeleteConfirm(null)
+      await load()
+    }
+    setDeletingId(null)
   }
 
   async function copyLink() {
@@ -281,6 +364,8 @@ export default function ProgressPage() {
   const pace = isPlus ? getPace(entries, goal.goal_weight) : null
   const daysSince = daysSinceLastEntry(entries)
   const showNudge = !nudgeDismissed && daysSince !== null && daysSince >= 2
+
+  const lifetimeSteps = entries.reduce((sum, e) => sum + (e.steps || 0), 0)
 
   const rawChartData = [...entries].reverse().slice(-14).map(e => ({
     date: new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
@@ -465,6 +550,45 @@ export default function ProgressPage() {
         <div className="stat-card"><div className="stat-value">{goal.daily_step_goal.toLocaleString()}</div><div className="stat-label">Step goal</div></div>
       </div>
 
+      {/* Lifetime Steps Card */}
+      {lifetimeSteps > 0 && (
+        <div className="card p-4" style={{ border: '1px solid var(--border)' }}>
+          <button
+            onClick={() => {
+              setStepsExpanded(v => !v)
+              if (!stepsExpanded) fetchLifetimeFact(lifetimeSteps)
+            }}
+            className="w-full flex items-center justify-between"
+            style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-lg">👣</span>
+              <div className="text-left">
+                <p className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Lifetime Steps</p>
+                <p className="text-lg font-bold" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-display)' }}>
+                  {lifetimeSteps.toLocaleString()}
+                </p>
+              </div>
+            </div>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', transform: stepsExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0 }}>
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          {stepsExpanded && (
+            <div className="mt-3 pt-3 animate-fade-in" style={{ borderTop: '1px solid var(--border)' }}>
+              {lifetimeFactLoading ? (
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 border-2 rounded-full animate-spin flex-shrink-0" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Calculating your journey…</p>
+                </div>
+              ) : lifetimeFact ? (
+                <p className="text-sm" style={{ color: 'var(--accent-text)', lineHeight: 1.6 }}>🌍 {lifetimeFact}</p>
+              ) : null}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Log entry */}
       <div className="card p-4">
         <div className="flex items-center justify-between mb-3">
@@ -478,6 +602,7 @@ export default function ProgressPage() {
               className="input-base text-xs py-1 px-2"
               style={{ width: 'auto', minWidth: 0 }}
               value={logDate}
+              min={getMaxBackdate()}
               max={getTodayLocal()}
               onChange={e => setLogDate(e.target.value)}
             />
@@ -572,10 +697,14 @@ export default function ProgressPage() {
       {entries.length > 0 && (
         <div className="card p-4">
           <h2 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>History</h2>
-          <div className="space-y-2">
+          <div className="space-y-1">
             {entries.slice(0, 10).map((entry, i) => (
-              <div key={entry.id} className="py-2 border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
-                <div className="flex items-center justify-between">
+              <div key={entry.id} className="rounded-xl overflow-hidden" style={{ border: editingId === entry.id ? '1px solid var(--accent)' : '1px solid transparent' }}>
+                <button
+                  className="w-full py-2.5 px-1 flex items-center justify-between text-left"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
+                  onClick={() => editingId === entry.id ? cancelEdit() : startEdit(entry)}
+                >
                   <div className="flex items-center gap-2 min-w-0">
                     {i === 0 && <span className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>Latest</span>}
                     <span className="text-sm truncate" style={{ color: 'var(--text-secondary)' }}>
@@ -585,9 +714,61 @@ export default function ProgressPage() {
                   <div className="flex items-center gap-3 text-sm flex-shrink-0">
                     <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{entry.weight} {unit}</span>
                     {entry.steps > 0 && <span style={{ color: 'var(--text-muted)' }}>{entry.steps.toLocaleString()}</span>}
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--text-muted)', transform: editingId === entry.id ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0 }}>
+                      <polyline points="6 9 12 15 18 9"/>
+                    </svg>
                   </div>
-                </div>
-                {entry.note && <p className="text-xs mt-1" style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>&ldquo;{entry.note}&rdquo;</p>}
+                </button>
+                {editingId === entry.id && (
+                  <div className="px-1 pt-3 pb-2 space-y-3 animate-fade-in">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="label">Weight ({unit})</label>
+                        <input className="input-base" type="number" step="0.1" value={editWeight} onChange={e => setEditWeight(e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="label">Steps</label>
+                        <input className="input-base" type="number" value={editSteps} onChange={e => setEditSteps(e.target.value)} />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="label">Note <span style={{ color: 'var(--text-muted)' }}>(optional)</span></label>
+                      <input className="input-base" placeholder="How were you feeling?" value={editNote} onChange={e => setEditNote(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="label">Activities</label>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {ACTIVITY_OPTIONS.map(a => {
+                          const active = editActivities.includes(a)
+                          return (
+                            <button key={a} type="button" onClick={() => setEditActivities(prev => active ? prev.filter(x => x !== a) : [...prev, a])}
+                              className="px-2.5 py-1 rounded-full text-xs font-medium transition-all"
+                              style={{ background: active ? 'var(--accent)' : 'var(--bg-input)', color: active ? '#0D1117' : 'var(--text-secondary)', border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}` }}>
+                              {a}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                    {showDeleteConfirm === entry.id ? (
+                      <div className="rounded-xl p-3 space-y-2" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                        <p className="text-xs font-medium" style={{ color: 'var(--danger)' }}>Delete this entry? This cannot be undone.</p>
+                        <div className="flex gap-2">
+                          <button onClick={() => deleteEntry(entry.id)} disabled={deletingId === entry.id} className="flex-1 py-1.5 rounded-lg text-xs font-semibold" style={{ background: 'var(--danger)', color: 'white', border: 'none', cursor: 'pointer' }}>
+                            {deletingId === entry.id ? 'Deleting...' : 'Yes, delete'}
+                          </button>
+                          <button onClick={() => setShowDeleteConfirm(null)} className="flex-1 py-1.5 rounded-lg text-xs font-semibold btn-secondary">Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button onClick={() => saveEdit(entry.id)} disabled={savingEdit || !editWeight} className="flex-1 btn-primary py-2 text-xs">{savingEdit ? 'Saving...' : 'Save changes'}</button>
+                        <button onClick={() => setShowDeleteConfirm(entry.id)} className="py-2 px-3 rounded-xl text-xs font-semibold" style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.15)', cursor: 'pointer' }}>Delete</button>
+                        <button onClick={cancelEdit} className="py-2 px-3 rounded-xl text-xs font-semibold btn-secondary">Cancel</button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
