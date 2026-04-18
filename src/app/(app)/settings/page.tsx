@@ -15,6 +15,8 @@ export default function SettingsPage() {
   const [proofPhotosPublic, setProofPhotosPublic] = useState(true)
   const [savingPrivacy, setSavingPrivacy] = useState(false)
   const [userId, setUserId] = useState('')
+  const [leaderboardOptIn, setLeaderboardOptIn] = useState(false)
+  const [savingLeaderboard, setSavingLeaderboard] = useState(false)
   const [referralCode, setReferralCode] = useState('')
   const [referralEnabled, setReferralEnabled] = useState(false)
   const [referralCopied, setReferralCopied] = useState(false)
@@ -24,10 +26,11 @@ export default function SettingsPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
       setUserId(user.id)
-      const { data } = await supabase.from('profiles').select('proof_photos_public, referral_code').eq('id', user.id).maybeSingle()
+      const { data } = await supabase.from('profiles').select('proof_photos_public, referral_code, leaderboard_opt_in').eq('id', user.id).maybeSingle()
       if (data) {
         setProofPhotosPublic(data.proof_photos_public ?? true)
         setReferralCode(data.referral_code || '')
+        setLeaderboardOptIn(data.leaderboard_opt_in || false)
       }
       const { data: appSettings } = await supabase.from('app_settings').select('referral_enabled').eq('id', 1).maybeSingle()
       setReferralEnabled(appSettings?.referral_enabled || false)
@@ -58,6 +61,13 @@ export default function SettingsPage() {
     await supabase.from('profiles').delete().eq('id', user.id)
     await supabase.auth.signOut()
     router.push('/?deleted=1')
+  }
+
+  async function saveLeaderboardOptIn(val: boolean) {
+    setSavingLeaderboard(true)
+    setLeaderboardOptIn(val)
+    await supabase.from('profiles').update({ leaderboard_opt_in: val }).eq('id', userId)
+    setSavingLeaderboard(false)
   }
 
   async function copyReferral() {
@@ -107,6 +117,24 @@ export default function SettingsPage() {
             style={{ background: proofPhotosPublic ? 'var(--accent)' : 'var(--border)', width: 44, height: 26, borderRadius: 999, position: 'relative', border: 'none', cursor: 'pointer', transition: 'background 0.2s', flexShrink: 0 }}
           >
             <div style={{ position: 'absolute', top: 3, width: 20, height: 20, background: 'white', borderRadius: '50%', transition: 'left 0.2s', left: proofPhotosPublic ? '21px' : '3px' }} />
+          </button>
+        </div>
+      </div>
+
+      {/* Leaderboard */}
+      <div className="card p-4 mb-4">
+        <h2 className="text-sm font-semibold mb-3" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>Leaderboard</h2>
+        <div className="flex items-center justify-between">
+          <div style={{ flex: 1, marginRight: 12 }}>
+            <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Appear on weekly leaderboard</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>Show your name and weekly step count in the chat leaderboard. Off by default.</p>
+          </div>
+          <button
+            onClick={() => saveLeaderboardOptIn(!leaderboardOptIn)}
+            disabled={savingLeaderboard}
+            style={{ background: leaderboardOptIn ? 'var(--accent)' : 'var(--border)', width: 44, height: 26, borderRadius: 999, position: 'relative', border: 'none', cursor: 'pointer', transition: 'background 0.2s', flexShrink: 0 }}
+          >
+            <div style={{ position: 'absolute', top: 3, width: 20, height: 20, background: 'white', borderRadius: '50%', transition: 'left 0.2s', left: leaderboardOptIn ? '21px' : '3px' }} />
           </button>
         </div>
       </div>
