@@ -7,6 +7,11 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const username = searchParams.get('username')
   if (!username) return new Response('No username', { status: 400 })
+  const streakParam = searchParams.get('streak') || '0'
+  const stepsParam = searchParams.get('steps') || '0'
+  const factParam = searchParams.get('fact') || ''
+  const streak = parseInt(streakParam)
+  const lifetimeSteps = parseInt(stepsParam)
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -42,6 +47,7 @@ export async function GET(req: Request) {
   const totalToLose = goal ? profile.start_weight - goal.goal_weight : 0
   const pctToGoal = totalToLose > 0 ? Math.min(100, Math.max(0, Math.round((lostSoFar / totalToLose) * 100))) : 0
   const progressBarFill = Math.max(2, pctToGoal)
+  const stepMiles = lifetimeSteps > 0 ? (lifetimeSteps * 0.000473).toFixed(0) : '0'
 
   return new ImageResponse(
     (
@@ -134,6 +140,44 @@ export async function GET(req: Request) {
               }} />
             </div>
           </div>
+
+          {/* Streak + Steps row */}
+          <div style={{ display: 'flex', gap: '20px', marginBottom: '36px' }}>
+            {streak > 0 && (
+              <div style={{
+                flex: 1, background: '#161B24', border: '1px solid #252D3D',
+                borderRadius: '20px', padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: '8px',
+              }}>
+                <span style={{ fontSize: '13px', fontWeight: 700, color: '#556070', letterSpacing: '2.5px' }}>STREAK</span>
+                <span style={{ fontSize: '52px', fontWeight: 900, color: '#F0F4F8', lineHeight: 1 }}>
+                  {streak >= 7 ? '🔥' : streak >= 3 ? '⚡' : '📅'} {streak}
+                </span>
+                <span style={{ fontSize: '16px', color: '#556070' }}>days</span>
+              </div>
+            )}
+            {lifetimeSteps > 0 && (
+              <div style={{
+                flex: 1, background: '#161B24', border: '1px solid #252D3D',
+                borderRadius: '20px', padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: '8px',
+              }}>
+                <span style={{ fontSize: '13px', fontWeight: 700, color: '#556070', letterSpacing: '2.5px' }}>LIFETIME STEPS</span>
+                <span style={{ fontSize: '42px', fontWeight: 900, color: '#F0F4F8', lineHeight: 1 }}>{lifetimeSteps.toLocaleString()}</span>
+                <span style={{ fontSize: '16px', color: '#556070' }}>≈ {Number(stepMiles).toLocaleString()} miles walked</span>
+              </div>
+            )}
+          </div>
+
+          {/* Fun fact */}
+          {factParam && (
+            <div style={{
+              background: '#0F2724', border: '1px solid #2DD4BF40',
+              borderRadius: '20px', padding: '28px 32px', marginBottom: '40px',
+              display: 'flex', alignItems: 'flex-start', gap: '16px',
+            }}>
+              <span style={{ fontSize: '28px', flexShrink: 0 }}>🌍</span>
+              <span style={{ fontSize: '22px', color: '#2DD4BF', lineHeight: 1.5, fontStyle: 'italic' }}>{factParam}</span>
+            </div>
+          )}
 
           {/* Footer CTA */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
