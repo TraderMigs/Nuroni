@@ -184,6 +184,9 @@ export default function ChatPage() {
   const [todayProofs, setTodayProofs] = useState<{ id: string; photo_url: string; category: string; user_id: string; display_name?: string }[]>([])
   const [todayProofsExpanded, setTodayProofsExpanded] = useState(false)
   const [fullscreenTodayPhoto, setFullscreenTodayPhoto] = useState<string | null>(null)
+  const [leaderboardExpanded, setLeaderboardExpanded] = useState(false)
+  const [leaderboard, setLeaderboard] = useState<{ id: string; display_name: string; username: string; weekly_steps: number; streak: number }[]>([])
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false)
   const [showCategoryPicker, setShowCategoryPicker] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [proofToast, setProofToast] = useState('')
@@ -724,6 +727,79 @@ export default function ChatPage() {
           <img src={fullscreenTodayPhoto} alt="Proof" style={{ maxWidth: '95vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 12 }} onClick={e => e.stopPropagation()} />
         </div>
       )}
+
+      {/* Weekly Leaderboard */}
+      <div className="mt-1">
+        <button
+          onClick={() => {
+            setLeaderboardExpanded(v => !v)
+            if (!leaderboardExpanded) loadLeaderboard()
+          }}
+          className="w-full px-4 py-2 flex items-center justify-between"
+          style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+        >
+          <p className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
+            🏆 This Week&apos;s Top Walkers
+            {leaderboard.length > 0 && (
+              <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs" style={{ background: 'rgba(45,212,191,0.12)', color: 'var(--accent-text)' }}>
+                {leaderboard.length}
+              </span>
+            )}
+          </p>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', transform: leaderboardExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+        {leaderboardExpanded && (
+          <div className="px-4 pb-2 animate-fade-in">
+            {leaderboardLoading ? (
+              <div className="flex items-center gap-2 py-2">
+                <div className="w-4 h-4 border-2 rounded-full animate-spin flex-shrink-0" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading leaderboard…</p>
+              </div>
+            ) : leaderboard.length === 0 ? (
+              <div className="py-2">
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  No one on the leaderboard yet. Opt in via <strong style={{ color: 'var(--text-secondary)' }}>Profile → Settings</strong> and log your steps to appear here.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {leaderboard.map((user, idx) => (
+                  <a
+                    key={user.id}
+                    href={`/u/${user.username}`}
+                    style={{ textDecoration: 'none', display: 'block' }}
+                  >
+                    <div
+                      className="flex items-center gap-3 px-3 py-2 rounded-xl transition-all"
+                      style={{
+                        background: idx === 0 ? 'rgba(255,215,0,0.06)' : idx === 1 ? 'rgba(192,192,192,0.06)' : idx === 2 ? 'rgba(205,127,50,0.06)' : 'var(--bg-input)',
+                        border: `1px solid ${idx === 0 ? 'rgba(255,215,0,0.2)' : idx === 1 ? 'rgba(192,192,192,0.15)' : idx === 2 ? 'rgba(205,127,50,0.15)' : 'var(--border)'}`,
+                      }}
+                    >
+                      <span className="text-sm font-bold flex-shrink-0 w-5 text-center" style={{ color: idx === 0 ? '#FFD700' : idx === 1 ? '#C0C0C0' : idx === 2 ? '#CD7F32' : 'var(--text-muted)' }}>
+                        {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}`}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{user.display_name}</p>
+                        {user.streak > 0 && (
+                          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                            {user.streak >= 7 ? '🔥' : user.streak >= 3 ? '⚡' : '📅'} {user.streak}d streak
+                          </p>
+                        )}
+                      </div>
+                      <p className="text-xs font-bold flex-shrink-0" style={{ color: 'var(--accent)' }}>
+                        {user.weekly_steps.toLocaleString()} steps
+                      </p>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {messages.length === 0 && (
