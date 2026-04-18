@@ -89,11 +89,11 @@ export default function OnboardingPage() {
         <div className="text-center mb-6">
           <img src="/logo.png" alt="Nuroni" style={{ height: '40px', width: 'auto', display: 'block', margin: '0 auto 1rem' }} />
           <div className="flex items-center justify-center gap-2 mb-2">
-            {[1, 2, 3, 4].map(i => (
+            {[1, 2, 3, 4, 5].map(i => (
               <div key={i} className="h-1.5 rounded-full transition-all" style={{ width: step === i ? '24px' : '8px', background: step >= i ? 'var(--accent)' : 'var(--border)' }} />
             ))}
           </div>
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Step {step} of 4</p>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Step {step} of 5</p>
         </div>
 
         <div className="card p-6 animate-fade-in">
@@ -240,8 +240,46 @@ export default function OnboardingPage() {
               {error && <p className="text-xs" style={{ color: 'var(--danger)' }}>{error}</p>}
               <div className="flex gap-2">
                 <button className="btn-secondary flex-1" onClick={() => setStep(3)}>← Back</button>
-                <button className="btn-primary flex-1" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Start journey →'}</button>
+                <button className="btn-primary flex-1" onClick={() => setStep(5)}>Next →</button>
               </div>
+            </div>
+          )}
+
+          {/* Step 5 — App tour + install */}
+          {step === 5 && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
+                Here's what's waiting for you
+              </h2>
+              <div className="space-y-3">
+                {[
+                  { icon: '📈', tab: 'Progress', desc: 'Log your weight and steps daily. See your trend line, streak, and how far you've come.' },
+                  { icon: '🎯', tab: 'Goals', desc: 'Set your goal weight and daily steps. Your private journal lives here too.' },
+                  { icon: '💬', tab: 'Chat', desc: 'Live community + 5 AI coaches. Type @coach to ask anything about fitness, nutrition, or mindset.' },
+                  { icon: '👤', tab: 'Profile', desc: 'Your public journey page. Share it. Let people follow your progress.' },
+                ].map(item => (
+                  <div key={item.tab} className="flex items-start gap-3 p-3 rounded-xl" style={{ background: 'var(--bg-input)', border: '1px solid var(--border)' }}>
+                    <span className="text-xl flex-shrink-0">{item.icon}</span>
+                    <div>
+                      <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-display)' }}>{item.tab}</p>
+                      <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)', lineHeight: 1.5 }}>{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="p-3 rounded-xl" style={{ background: 'rgba(45,212,191,0.06)', border: '1px solid rgba(45,212,191,0.2)' }}>
+                <p className="text-xs font-semibold mb-1" style={{ color: 'var(--accent)' }}>📱 Add Nuroni to your home screen</p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                  <strong style={{ color: 'var(--text-secondary)' }}>iPhone:</strong> Tap the Share button in Safari → "Add to Home Screen"<br />
+                  <strong style={{ color: 'var(--text-secondary)' }}>Android:</strong> Tap the browser menu (⋮) → "Add to Home Screen"<br />
+                  Works like a native app — no App Store needed.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button className="btn-secondary flex-1" onClick={() => setStep(4)}>← Back</button>
+                <button className="btn-primary flex-1" onClick={save} disabled={saving}>{saving ? 'Saving…' : "Let's go →"}</button>
+              </div>
+              {error && <p className="text-xs" style={{ color: 'var(--danger)' }}>{error}</p>}
             </div>
           )}
 
