@@ -467,6 +467,78 @@ export default function ChatPage() {
     setFollowLoading(false)
   }
 
+  async function loadLeaderboard() {
+    if (leaderboardLoading || leaderboard.length > 0) return
+    setLeaderboardLoading(true)
+    try {
+      const cutoff = new Date(Date.now() - 7 * 86400000).toISOString()
+      const { data: opted } = await supabase
+        .from('profiles')
+        .select('id, display_name, username')
+        .eq('leaderboard_opt_in', true)
+        .eq('is_coach', false)
+        .limit(50)
+
+      if (!opted || opted.length === 0) { setLeaderboardLoading(false); return }
+
+      const ids = opted.map((u: { id: string }) => u.id)
+      const { data: weekEntries } = await supabase
+        .from('entries')
+        .select('user_id, steps')
+        .in('user_id', ids)
+        .gte('created_at', cutoff)
+
+      const { data: allEntries } = await supabase
+        .from('entries')
+        .select('user_id, created_at')
+        .in('user_id', ids)
+        .order('created_at', { ascending: false })
+        .limit(500)
+
+      const stepMap: Record<string, number> = {}
+      weekEntries?.forEach((e: { user_id: string; steps: number }) => {
+        stepMap[e.user_id] = (stepMap[e.user_id] || 0) + (e.steps || 0)
+      })
+
+      function computeStreakLocal(userEntries: { created_at: string }[]): number {
+        if (!userEntries.length) return 0
+        const days = Array.from(new Set(userEntries.map(e => new Date(e.created_at).toDateString())))
+        const today = new Date().toDateString()
+        const yesterday = new Date(Date.now() - 86400000).toDateString()
+        if (days[0] !== today && days[0] !== yesterday) return 0
+        let streak = 1
+        for (let i = 1; i < days.length; i++) {
+          const prev = new Date(days[i - 1]).getTime()
+          const curr = new Date(days[i]).getTime()
+          if (Math.round((prev - curr) / 86400000) === 1) streak++
+          else break
+        }
+        return streak
+      }
+
+      const entriesByUser: Record<string, { created_at: string }[]> = {}
+      allEntries?.forEach((e: { user_id: string; created_at: string }) => {
+        if (!entriesByUser[e.user_id]) entriesByUser[e.user_id] = []
+        entriesByUser[e.user_id].push(e)
+      })
+
+      const ranked = opted
+        .map((u: { id: string; display_name: string; username: string }) => ({
+          id: u.id,
+          display_name: u.display_name || u.username || 'Member',
+          username: u.username || '',
+          weekly_steps: stepMap[u.id] || 0,
+          streak: computeStreakLocal(entriesByUser[u.id] || []),
+        }))
+        .filter((u: { weekly_steps: number }) => u.weekly_steps > 0)
+        .sort((a: { weekly_steps: number }, b: { weekly_steps: number }) => b.weekly_steps - a.weekly_steps)
+        .slice(0, 25)
+
+      setLeaderboard(ranked)
+    } catch {}
+    setLeaderboardLoading(false)
+  }
+
   function dismissTip() { setShowTip(false); localStorage.setItem('nuroni-chat-tip', '1') }
   function dismissCoachTip() { setShowCoachTip(false); localStorage.setItem('nuroni-coach-tip', '1') }
 
