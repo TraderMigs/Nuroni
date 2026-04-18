@@ -78,7 +78,7 @@ export default function OnboardingPage() {
       reply_to_user_id: user.id,
     })
 
-    router.push('/chat')
+    router.push('/progress')
   }
 
   const unit = form.weight_unit
